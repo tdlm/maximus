@@ -1,0 +1,30 @@
+[package]
+name = "maximus"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.22"
+crossbeam-channel = "0.5.17"
+crossterm = "0.28"
+dirs = "6"
+fuzzy-matcher = "0.3.7"
+portable-pty = "0.9.0"
+ratatui = "0.29"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+similar = "2"
+toml = "0.8"
+two-face = "0.5.2"
+unicode-width = "=0.2.0"
+uuid = { version = "1.27.0", features = ["v4"] }
+vt100 = "0.15"
+
+# vt100 0.15 computes `rows - scrollback_offset` when scrolled back further than one screen;
+# wrapping arithmetic yields the correct rows, so don't trap on it in debug builds.
+[profile.dev.package.vt100]
+overflow-checks = false
+
+[profile.release]
+lto = "thin"
