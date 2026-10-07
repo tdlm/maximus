@@ -7,15 +7,51 @@ Each session is the real `claude` CLI in an embedded terminal pane, so everythin
 works as usual. maximus adds a cross-project agent list with live status, a `ctrl+p` switcher,
 a prompt launcher, a changeset viewer, and notifications.
 
-## Build & run
+## Install
+
+Prebuilt binaries for macOS and Linux (Apple Silicon/ARM64 and x86_64):
 
 ```sh
-cargo build --release
-./target/release/maximus            # adds the current git repo as a project on first run
-./target/release/maximus ~/Dev/app  # add a specific folder
+brew install tdlm/tap/maximus
 ```
 
-Install onto your PATH with `cargo install --path .` (puts it in `~/.cargo/bin`).
+or
+
+```sh
+curl -LsSf https://github.com/tdlm/maximus/releases/latest/download/maximus-installer.sh | sh
+```
+
+You also need the [`claude` CLI](https://code.claude.com/docs/en/setup) and `git` on your PATH.
+
+```sh
+maximus            # adds the current git repo as a project on first run
+maximus ~/Dev/app  # add a specific folder
+```
+
+## Build from source
+
+Needs Rust ([rustup](https://rustup.rs), or `brew install rustup && rustup default stable`).
+Run `make` to list targets:
+
+```sh
+make run      # build and run the release binary
+make dev      # debug build with config/state isolated in .dev/
+make install  # install to ~/.cargo/bin
+```
+
+## Releasing
+
+Releases are built by [dist](https://opensource.axo.dev/cargo-dist/) in GitHub Actions
+(`.github/workflows/release.yml`). Bump `version` in `Cargo.toml`, commit, then:
+
+```sh
+make tag      # tags v<version> and pushes it
+```
+
+The workflow builds all four targets, creates a GitHub Release with the binaries and an install
+script, and pushes an updated formula to [tdlm/homebrew-tap](https://github.com/tdlm/homebrew-tap)
+(needs the `HOMEBREW_TAP_TOKEN` repo secret). `make dist-plan` previews a release. After changing
+`dist-workspace.toml`, run `dist generate` to regenerate the workflow.
 
 ## Keys
 
