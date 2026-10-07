@@ -8,9 +8,10 @@ endif
 export PATH := $(dir $(CARGO)):$(PATH)
 
 BIN := target/release/maximus
+VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 DEV_DIR := .dev
 
-.PHONY: build release run dev test lint fmt check install uninstall clean help
+.PHONY: build release run dev test lint fmt check install uninstall clean help dist-plan tag
 
 .DEFAULT_GOAL := help
 
@@ -53,3 +54,12 @@ uninstall: ## Remove from ~/.cargo/bin
 clean: ## Remove build output and .dev/
 	$(CARGO) clean
 	rm -rf $(DEV_DIR)
+
+dist-plan: ## Preview what a release would build and publish
+	@dist plan
+
+tag: ## Tag the Cargo.toml version and push it, triggering a GitHub release
+	@git diff --quiet && git diff --cached --quiet || { echo "Commit your changes first."; exit 1; }
+	@git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null && { echo "v$(VERSION) already exists; bump version in Cargo.toml."; exit 1; } || true
+	git tag -a "v$(VERSION)" -m "v$(VERSION)"
+	git push origin "v$(VERSION)"
