@@ -2,6 +2,9 @@
 name = "maximus"
 version = "0.1.0"
 edition = "2024"
+description = "A keyboard-first TUI for running Claude Code sessions across many projects"
+repository = "https://github.com/tdlm/maximus"
+homepage = "https://github.com/tdlm/maximus"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -27,4 +30,9 @@ vt100 = "0.15"
 overflow-checks = false
 
 [profile.release]
+lto = "thin"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
 lto = "thin"
