@@ -5,6 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{App, Focus, GraphLine, Modal, RowKey},
@@ -465,6 +466,56 @@ fn draw_graph(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+/// The empty pane: a hint for the next step, then the most useful shortcuts.
+fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
+    let t = app.theme;
+    let k = &app.keys;
+    let shortcuts: Vec<(String, &str)> = vec![
+        (k.new_prompt.short(), "New prompt"),
+        ("w".into(), "New prompt in a new worktree"),
+        (k.switcher.short(), "Switch sessions, projects, commands"),
+        (k.next_session.short(), "Jump to the session that needs you"),
+        (
+            format!("{} {}", k.focus_list.short(), k.focus_pane.short()),
+            "Focus agent list / pane",
+        ),
+        (k.diff.short(), "View uncommitted changes"),
+        (k.graph.short(), "Show/hide the commit graph"),
+        ("e".into(), "Rename the selected session"),
+        ("x".into(), "Close session / remove project"),
+        (k.settings.short(), "Settings and key bindings"),
+    ];
+    // Message, blank line, then as many shortcuts as fit.
+    let room = (area.height as usize).saturating_sub(2);
+    let shortcuts = &shortcuts[..shortcuts.len().min(room)];
+    let kw = shortcuts.iter().map(|(k, _)| k.width()).max().unwrap_or(0);
+    let dw = shortcuts.iter().map(|(_, d)| d.width()).max().unwrap_or(0);
+    let pad = (area.width as usize).saturating_sub(kw + 2 + dw) / 2;
+    let mut lines = vec![
+        Line::styled(msg, Style::default().fg(t.fg)).centered(),
+        Line::raw(""),
+    ];
+    for (key, desc) in shortcuts {
+        lines.push(Line::from(vec![
+            Span::raw(" ".repeat(pad + kw - key.width())),
+            Span::styled(
+                key.clone(),
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("  {desc}"), Style::default().fg(t.muted)),
+        ]));
+    }
+    let h = (lines.len() as u16).min(area.height);
+    f.render_widget(
+        Paragraph::new(lines),
+        Rect {
+            y: area.y + (area.height - h) / 2,
+            height: h,
+            ..area
+        },
+    );
+}
+
 fn vt_color(c: vt100::Color, default: Color) -> Color {
     match c {
         vt100::Color::Default => default,
@@ -522,15 +573,7 @@ fn draw_pane(f: &mut Frame, app: &mut App) {
                 app.keys.new_prompt.short()
             ),
         };
-        let y = inner.y + inner.height / 2;
-        f.render_widget(
-            Paragraph::new(Line::styled(msg, Style::default().fg(t.muted))).centered(),
-            Rect {
-                y,
-                height: 1,
-                ..inner
-            },
-        );
+        draw_help(f, app, inner, msg);
         return;
     };
 
