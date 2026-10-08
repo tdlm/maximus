@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{App, Focus, Modal, RowKey},
+    app::{App, Focus, GraphLine, Modal, RowKey},
     session::{Session, Status},
     theme::Theme,
 };
@@ -134,7 +134,29 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ..main
     };
 
-    draw_list(f, app);
+    // The graph takes the bottom of the left column when open and there's room for it.
+    let tl_h = (main.height * 2 / 5).min(14);
+    let (agents, graph) = if app.state.graph_open && main.height >= 16 {
+        let r = app.list_rect;
+        (
+            Rect {
+                height: r.height - tl_h,
+                ..r
+            },
+            Some(Rect {
+                y: r.y + r.height - tl_h,
+                height: tl_h,
+                ..r
+            }),
+        )
+    } else {
+        (app.list_rect, None)
+    };
+    app.graph_rect = graph.unwrap_or_default();
+    draw_list(f, app, agents);
+    if let Some(r) = graph {
+        draw_graph(f, app, r);
+    }
     draw_pane(f, app);
     draw_footer(
         f,
@@ -228,12 +250,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_list(f: &mut Frame, app: &mut App) {
+fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
     let focused = app.focus == Focus::List && app.modal.is_none();
     let block = panel(" Agents ", focused, t);
-    let inner = block.inner(app.list_rect);
-    f.render_widget(block, app.list_rect);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
     let rows = app.rows();
     let sel_idx = app
         .selected
@@ -341,6 +363,108 @@ fn draw_list(f: &mut Frame, app: &mut App) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+fn draw_graph(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+    let focused = app.focus == Focus::Graph && app.modal.is_none();
+    let block = panel(" Graph ", focused, t);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let g = &mut app.graph;
+    let muted = Style::default().fg(t.muted);
+    let empty = if g.dir.is_none() {
+        Some(" No project selected")
+    } else if !g.loaded {
+        Some(" Loading…")
+    } else if g.rows.is_empty() {
+        Some(" No commits")
+    } else {
+        None
+    };
+    if let Some(msg) = empty {
+        f.render_widget(Paragraph::new(Line::styled(msg, muted)), inner);
+        return;
+    }
+    let all = g.lines();
+    let cursor = g.cursor();
+    let at = all.iter().position(|l| *l == cursor).unwrap_or(0);
+    let h = inner.height as usize;
+    if at < g.offset {
+        g.offset = at;
+    } else if h > 0 && at >= g.offset + h {
+        g.offset = at + 1 - h;
+    }
+    g.offset = g.offset.min(all.len().saturating_sub(1));
+    let width = inner.width as usize;
+    let lines: Vec<Line> = all
+        .iter()
+        .skip(g.offset)
+        .take(h)
+        .map(|&line| {
+            let base = if focused && line == cursor {
+                Style::default().bg(t.selection)
+            } else {
+                Style::default()
+            };
+            let i = match line {
+                GraphLine::Row(i) => i,
+                GraphLine::File(fi) => {
+                    let ch = &g.files[fi];
+                    let (letter, color) = match ch.status {
+                        'A' => ('A', t.green),
+                        'D' => ('D', t.red),
+                        'R' => ('R', t.blue),
+                        _ => ('M', t.yellow),
+                    };
+                    // Continue the commit's graph lane down through its files.
+                    let lane: String = g.rows[g.sel]
+                        .graph
+                        .chars()
+                        .map(|c| if c == '*' { '│' } else { c })
+                        .collect();
+                    let line = truncate_line(
+                        Line::from(vec![
+                            Span::styled(format!(" {lane}  "), base.fg(t.border)),
+                            Span::styled(format!("{letter} "), base.fg(color)),
+                            Span::styled(ch.path.clone(), base.fg(t.fg)),
+                        ]),
+                        width,
+                    );
+                    let pad = width.saturating_sub(line.width());
+                    let mut spans = line.spans;
+                    spans.push(Span::styled(" ".repeat(pad), base));
+                    return Line::from(spans);
+                }
+            };
+            let row = &g.rows[i];
+            let mut spans = vec![Span::styled(" ", base)];
+            for ch in row.graph.chars() {
+                let (s, c) = if ch == '*' {
+                    ('●', t.accent)
+                } else {
+                    (ch, t.muted)
+                };
+                spans.push(Span::styled(s.to_string(), base.fg(c)));
+            }
+            let Some(c) = &row.commit else {
+                return Line::from(spans);
+            };
+            spans.push(Span::styled(format!(" {} ", c.hash), base.fg(t.muted)));
+            if !c.refs.is_empty() {
+                spans.push(Span::styled(format!("({}) ", c.refs), base.fg(t.green)));
+            }
+            spans.push(Span::styled(c.subject.clone(), base.fg(t.fg)));
+            let right = Span::styled(format!(" {} ", age(c.time)), base.fg(t.muted));
+            let left = truncate_line(Line::from(spans), width.saturating_sub(right.width()));
+            let pad = width.saturating_sub(left.width() + right.width());
+            let mut spans = left.spans;
+            spans.push(Span::styled(" ".repeat(pad), base));
+            spans.push(right);
+            Line::from(spans)
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 fn vt_color(c: vt100::Color, default: Color) -> Color {
     match c {
         vt100::Color::Default => default,
@@ -351,6 +475,13 @@ fn vt_color(c: vt100::Color, default: Color) -> Color {
 
 fn draw_pane(f: &mut Frame, app: &mut App) {
     let t = app.theme;
+    // A file picked in the commit graph takes over the pane while the graph has focus.
+    if app.focus == Focus::Graph
+        && let Some(p) = &mut app.graph.preview
+    {
+        p.draw(f, app.pane_rect, false, t);
+        return;
+    }
     let focused = app.focus == Focus::Pane && app.modal.is_none();
     let current = app.current.clone().and_then(|id| app.session_idx(&id));
     let title = match current {
@@ -516,7 +647,25 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     if app.focus == Focus::List {
         add("⏎".into(), "open");
         add("x".into(), "close");
+        if app.state.graph_open {
+            add(k.next_session.short(), "graph");
+        }
         add("q".into(), "quit");
+    } else if app.focus == Focus::Graph {
+        add("j/k".into(), "move");
+        if app.graph.file.is_some() {
+            add("PgUp/PgDn".into(), "scroll");
+            add("h/l".into(), "pan");
+            add("s".into(), "split");
+        } else {
+            add("⏎".into(), "files");
+            add("y".into(), "copy hash");
+        }
+        if app.graph.expanded() {
+            add("esc".into(), "collapse");
+        } else {
+            add(k.prev_session.short(), "agents");
+        }
     } else {
         add(k.focus_list.short(), "list");
         add(k.next_session.short(), "next");
