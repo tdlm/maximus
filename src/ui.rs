@@ -136,7 +136,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     };
 
     // The graph takes the bottom of the left column when open and there's room for it.
-    let tl_h = (main.height * 2 / 5).min(14);
+    let tl_h = graph_height(app.state.graph_height, main.height);
     let (agents, graph) = if app.state.graph_open && main.height >= 16 {
         let r = app.list_rect;
         (
@@ -249,6 +249,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         None => {}
     }
+}
+
+/// Graph panel height for a left column of `column` rows: the saved height (0 = automatic),
+/// kept between 4 rows and enough to leave the Agents panel 6.
+pub fn graph_height(saved: u16, column: u16) -> u16 {
+    let h = if saved == 0 {
+        (column * 2 / 5).min(14)
+    } else {
+        saved
+    };
+    h.clamp(4, column.saturating_sub(6).max(4))
 }
 
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
