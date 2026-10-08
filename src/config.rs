@@ -137,7 +137,7 @@ impl Default for Keys {
     fn default() -> Self {
         Self {
             switcher: "ctrl+p".into(),
-            new_prompt: "ctrl+l".into(),
+            new_prompt: "ctrl+j".into(),
             diff: "ctrl+g".into(),
             settings: "ctrl+s".into(),
             next_session: "alt+down".into(),
