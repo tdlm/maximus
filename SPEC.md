@@ -62,7 +62,8 @@ All rebindable in settings. Note: these keys are then unavailable to claude itse
 One fuzzy list, sectioned:
 1. **Sessions** — all projects, attention order (needs input → working → unseen → rest)
 2. **Projects** — jump to project (its most recent session)
-3. **Commands** — new worktree, remove project, change default model, open settings, …
+3. **Commands** — new worktree, merge or discard the current worktree, remove project, change
+   default model, open settings, …
 4. **Add folder** — fuzzy directory finder (rooted at configurable dirs, e.g. `~/Dev`)
 
 ## New prompt (ctrl+j)
@@ -82,6 +83,13 @@ Centered modal:
 - `^t` picks: main checkout (default) · existing worktree · **new worktree** (branch auto-named from
   prompt, editable).
 - Enter launches `claude` with the prompt; focus follows the new session.
+
+## Finishing a worktree
+
+`m` on a session (or **Merge worktree** in the switcher) merges the worktree's branch into the
+main checkout's current branch, stops and archives the worktree's sessions, then deletes the
+worktree and the branch. Refused if the worktree has uncommitted changes; a conflicted merge is
+aborted. **Discard worktree** force-deletes both without merging, after a confirm.
 
 ## Diff viewer (ctrl+g)
 

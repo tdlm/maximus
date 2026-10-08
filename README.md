@@ -94,12 +94,18 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+q`   | Show/hide the commit graph               |
 
 Agent list: `j/k` move · `enter` open (resumes stopped) · `n` new prompt · `w` new prompt in a new
-worktree · `r` resume · `e` rename session · `x` close session / remove project · `d` diff · `t` graph · `/` switcher · `,` settings · `q` quit.
+worktree · `r` resume · `e` rename session · `x` close session / remove project · `m` merge worktree · `d` diff · `t` graph · `/` switcher · `,` settings · `q` quit.
 
 Graph (commits on the current session's checkout): the selected commit expands to show its changed
 files · `j/k` move through commits and files · a selected file's diff shows on the right
 (`PgUp/PgDn` scroll, `h/l` pan, `s` split/unified) · `y` copy hash · `esc` collapse the commit,
 again to go back to Agents (or `alt+↑`) · `t` hide.
+
+Finishing a worktree: `m` on a session in a worktree merges its branch into the branch the main
+checkout is on, stops the worktree's sessions, and deletes the worktree and branch. It refuses if
+the worktree has uncommitted changes and aborts the merge on conflicts, leaving everything as it
+was. The switcher also has **Discard worktree**, which deletes the worktree and branch without
+merging.
 
 Pane: everything goes to claude. `shift+PgUp/PgDn` or the mouse wheel scrolls back; drag to select
 and copy.
