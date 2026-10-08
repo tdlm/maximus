@@ -130,6 +130,7 @@ pub struct Keys {
     pub prev_session: String,
     pub focus_list: String,
     pub focus_pane: String,
+    pub graph: String,
 }
 
 impl Default for Keys {
@@ -143,6 +144,7 @@ impl Default for Keys {
             prev_session: "alt+up".into(),
             focus_list: "alt+left".into(),
             focus_pane: "alt+right".into(),
+            graph: "ctrl+q".into(),
         }
     }
 }
@@ -200,6 +202,7 @@ pub struct State {
     pub list_width: u16,
     pub diff_tree_width: u16,
     pub diff_split: bool,
+    pub graph_open: bool,
     pub sessions: Vec<SessionRecord>,
 }
 
@@ -210,6 +213,7 @@ impl Default for State {
             list_width: 32,
             diff_tree_width: 36,
             diff_split: true,
+            graph_open: true,
             sessions: vec![],
         }
     }
