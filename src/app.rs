@@ -11,8 +11,8 @@ use ratatui::layout::Rect;
 
 use crate::{
     config::{Config, ProjectEntry, State, expand, tilde},
-    diff::{DiffAction, DiffView},
-    git,
+    diff::{DiffAction, DiffView, FilePreview},
+    git::{self, GraphRow},
     hooks::HookMsg,
     keys::{self, KeySet},
     notify,
@@ -31,6 +31,7 @@ pub enum AppEvent {
     Exited(String, u64),
     Hook(HookMsg),
     Folders(Vec<PathBuf>),
+    Graph(PathBuf, Vec<GraphRow>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +43,7 @@ pub enum RowKey {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Focus {
     List,
+    Graph,
     Pane,
 }
 
@@ -81,6 +83,7 @@ pub struct GlobalKeys {
     pub prev_session: KeySet,
     pub focus_list: KeySet,
     pub focus_pane: KeySet,
+    pub graph: KeySet,
 }
 
 impl GlobalKeys {
@@ -95,7 +98,143 @@ impl GlobalKeys {
             prev_session: KeySet::parse(&k.prev_session),
             focus_list: KeySet::parse(&k.focus_list),
             focus_pane: KeySet::parse(&k.focus_pane),
+            graph: KeySet::parse(&k.graph),
         }
+    }
+}
+
+/// Commit graph for the checkout behind the current session or selected project.
+#[derive(Default)]
+pub struct Graph {
+    pub dir: Option<PathBuf>,
+    pub rows: Vec<GraphRow>,
+    pub loaded: bool,
+    /// Selected row (always a commit row once loaded) and first visible line.
+    pub sel: usize,
+    pub offset: usize,
+    /// The selected commit's changed files, shown under it unless collapsed with esc.
+    pub files: Vec<git::Change>,
+    files_of: Option<String>,
+    pub collapsed: bool,
+    /// Selected file under the commit; None while the commit row itself is selected.
+    pub file: Option<usize>,
+    pub preview: Option<FilePreview>,
+    pending: bool,
+    fetched: Option<Instant>,
+}
+
+/// One line of the graph panel.
+#[derive(Clone, Copy, PartialEq)]
+pub enum GraphLine {
+    Row(usize),
+    File(usize),
+}
+
+impl Graph {
+    /// Moves the selection `d` commits, skipping the graph's connector-only lines.
+    fn step(&mut self, d: i32) {
+        let commits: Vec<usize> = (0..self.rows.len())
+            .filter(|&i| self.rows[i].commit.is_some())
+            .collect();
+        let Some(cur) = commits.iter().position(|&i| i >= self.sel) else {
+            return;
+        };
+        let next = (cur as i64 + d as i64).clamp(0, commits.len() as i64 - 1) as usize;
+        if commits[next] != self.sel {
+            self.sel = commits[next];
+            self.collapsed = false;
+            self.file = None;
+        } else if d == 0 {
+            self.sel = commits[next];
+        }
+    }
+
+    pub fn selected_hash(&self) -> Option<&str> {
+        self.rows
+            .get(self.sel)
+            .and_then(|r| r.commit.as_ref())
+            .map(|c| c.hash.as_str())
+    }
+
+    pub fn expanded(&self) -> bool {
+        !self.collapsed && self.files_of.as_deref() == self.selected_hash()
+    }
+
+    /// The panel's lines, with the selected commit's files under it when expanded.
+    pub fn lines(&self) -> Vec<GraphLine> {
+        let mut out = Vec::with_capacity(self.rows.len() + self.files.len());
+        for i in 0..self.rows.len() {
+            out.push(GraphLine::Row(i));
+            if i == self.sel && self.expanded() {
+                out.extend((0..self.files.len()).map(GraphLine::File));
+            }
+        }
+        out
+    }
+
+    pub fn cursor(&self) -> GraphLine {
+        match self.file {
+            Some(f) if self.expanded() => GraphLine::File(f),
+            _ => GraphLine::Row(self.sel),
+        }
+    }
+
+    /// j/k: walk down into the expanded commit's files, then on to the next commit.
+    fn down(&mut self) {
+        match self.file {
+            Some(f) if f + 1 < self.files.len() => self.file = Some(f + 1),
+            None if self.expanded() && !self.files.is_empty() => self.file = Some(0),
+            _ => self.step(1),
+        }
+    }
+
+    fn up(&mut self) {
+        match self.file {
+            Some(0) => self.file = None,
+            Some(f) => self.file = Some(f - 1),
+            None => self.step(-1),
+        }
+    }
+
+    /// Loads the selected commit's file list and the selected file's diff when they changed.
+    fn sync(&mut self, theme: &Theme, split: bool) {
+        let (Some(dir), Some(hash)) = (self.dir.clone(), self.selected_hash().map(String::from))
+        else {
+            return;
+        };
+        if !self.collapsed && self.files_of.as_deref() != Some(hash.as_str()) {
+            self.files = git::commit_files(&dir, &hash).unwrap_or_default();
+            self.files_of = Some(hash.clone());
+            self.file = None;
+        }
+        let want = self
+            .file
+            .filter(|_| self.expanded())
+            .and_then(|i| self.files.get(i));
+        let Some(ch) = want else {
+            self.preview = None;
+            return;
+        };
+        let title = match &ch.old_path {
+            Some(old) => format!("{old} → {} @ {hash}", ch.path),
+            None => format!("{} @ {hash}", ch.path),
+        };
+        if self.preview.as_ref().is_some_and(|p| p.title == title) {
+            return;
+        }
+        let old = match ch.status {
+            'A' => None,
+            _ => git::show_file(
+                &dir,
+                &format!("{hash}^"),
+                ch.old_path.as_ref().unwrap_or(&ch.path),
+            ),
+        };
+        let new = match ch.status {
+            'D' => None,
+            _ => git::show_file(&dir, &hash, &ch.path),
+        };
+        self.preview = Some(FilePreview::new(title, &ch.path, old, new, theme, split));
     }
 }
 
@@ -125,7 +264,9 @@ pub struct App {
     pub app_focused: bool,
     pub tick: u64,
     pub folders: Vec<PathBuf>,
+    pub graph: Graph,
     pub list_rect: Rect,
+    pub graph_rect: Rect,
     pub pane_rect: Rect,
     pub pane_inner: Rect,
     pub list_rows: Vec<(u16, RowKey)>,
@@ -170,7 +311,9 @@ impl App {
             app_focused: true,
             tick: 0,
             folders: vec![],
+            graph: Graph::default(),
             list_rect: Rect::default(),
+            graph_rect: Rect::default(),
             pane_rect: Rect::default(),
             pane_inner: Rect::default(),
             list_rows: vec![],
@@ -256,6 +399,63 @@ impl App {
             Some(RowKey::Session(id)) => self.session(id).map(|s| s.project.clone()),
             None => self.state.projects.first().map(|p| p.path.clone()),
         }
+    }
+
+    /// The checkout the graph follows: the current session's, else the selected project.
+    fn graph_dir(&self) -> Option<PathBuf> {
+        self.current
+            .as_ref()
+            .and_then(|c| self.session(c))
+            .map(|s| s.cwd.clone())
+            .or_else(|| self.selected_project())
+    }
+
+    /// Starts a background `git log` when the followed checkout changes or the graph is stale.
+    fn refresh_graph(&mut self) -> bool {
+        if !self.state.graph_open {
+            return false;
+        }
+        let dir = self.graph_dir();
+        let g = &mut self.graph;
+        let moved = dir != g.dir;
+        if moved {
+            *g = Graph {
+                dir: dir.clone(),
+                ..Default::default()
+            };
+        }
+        let stale = g
+            .fetched
+            .is_none_or(|t| t.elapsed() > Duration::from_secs(5));
+        if let Some(dir) = dir
+            && stale
+            && !g.pending
+        {
+            g.pending = true;
+            g.fetched = Some(Instant::now());
+            let tx = self.tx.clone();
+            std::thread::spawn(move || {
+                let rows = git::graph(&dir, 100).unwrap_or_default();
+                let _ = tx.send(AppEvent::Graph(dir, rows));
+            });
+        }
+        moved
+    }
+
+    fn toggle_graph(&mut self) {
+        self.state.graph_open = !self.state.graph_open;
+        let _ = self.state.save();
+        self.graph = Graph::default();
+        if self.state.graph_open {
+            self.refresh_graph();
+        } else if self.focus == Focus::Graph {
+            self.focus = Focus::List;
+        }
+        self.toast(if self.state.graph_open {
+            "Graph shown"
+        } else {
+            "Graph hidden"
+        });
     }
 
     fn live_count(&self) -> usize {
@@ -587,6 +787,27 @@ impl App {
             }
             AppEvent::Hook(m) => self.handle_hook(m),
             AppEvent::Folders(f) => self.folders = f,
+            AppEvent::Graph(dir, rows) => {
+                let g = &mut self.graph;
+                if g.dir.as_ref() == Some(&dir) {
+                    // Keep the selected commit selected across refreshes.
+                    let keep = g.selected_hash().map(str::to_string);
+                    g.rows = rows;
+                    g.sel = keep
+                        .and_then(|h| {
+                            g.rows
+                                .iter()
+                                .position(|r| r.commit.as_ref().is_some_and(|c| c.hash == h))
+                        })
+                        .unwrap_or(0);
+                    g.step(0);
+                    g.loaded = true;
+                    g.pending = false;
+                    if self.focus == Focus::Graph {
+                        self.sync_graph();
+                    }
+                }
+            }
         }
     }
 
@@ -670,6 +891,7 @@ impl App {
     pub fn on_tick(&mut self) -> bool {
         self.tick = self.tick.wrapping_add(1);
         let mut redraw = self.sessions.iter().any(|s| s.status == Status::Working);
+        redraw |= self.refresh_graph();
         if let Some((_, at)) = &self.toast
             && at.elapsed() > Duration::from_secs(4)
         {
@@ -1115,11 +1337,27 @@ impl App {
             self.modal = Some(Modal::Settings(SettingsModal::new()));
             return;
         }
+        // In the left column, alt+down/up step between the Agents and Graph panels.
+        if g.next_session.matches(&k) && self.focus == Focus::List && self.state.graph_open {
+            self.focus = Focus::Graph;
+            self.sync_graph();
+            return;
+        }
+        if g.prev_session.matches(&k) && self.focus == Focus::Graph {
+            self.focus = Focus::List;
+            return;
+        }
+        if g.next_session.matches(&k) && self.focus == Focus::Graph {
+            return;
+        }
         if g.next_session.matches(&k) {
             return self.cycle_attention(1);
         }
         if g.prev_session.matches(&k) {
             return self.cycle_attention(-1);
+        }
+        if g.graph.matches(&k) {
+            return self.toggle_graph();
         }
         if g.focus_list.matches(&k) {
             self.focus = Focus::List;
@@ -1135,6 +1373,83 @@ impl App {
         match self.focus {
             Focus::Pane => self.pane_key(k),
             Focus::List => self.list_key(k),
+            Focus::Graph => {
+                self.graph_key(k);
+                self.sync_graph();
+            }
+        }
+    }
+
+    fn sync_graph(&mut self) {
+        self.graph.sync(self.theme, self.state.diff_split);
+    }
+
+    fn graph_key(&mut self, k: KeyEvent) {
+        let g = &mut self.graph;
+        let page = (self.pane_inner.height as i32 / 2).max(1);
+        match k.code {
+            KeyCode::Down | KeyCode::Char('j') => g.down(),
+            KeyCode::Up | KeyCode::Char('k') => g.up(),
+            KeyCode::Char('g') | KeyCode::Home => g.step(-10_000),
+            KeyCode::Char('G') | KeyCode::End => g.step(10_000),
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right if g.file.is_none() => {
+                if g.collapsed {
+                    g.collapsed = false;
+                } else {
+                    g.down();
+                }
+            }
+            KeyCode::PageDown | KeyCode::Char(' ') => {
+                if let Some(p) = &mut g.preview {
+                    p.scroll_by(page);
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(p) = &mut g.preview {
+                    p.scroll_by(-page);
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if let Some(p) = &mut g.preview {
+                    p.pan_by(8);
+                }
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if let Some(p) = &mut g.preview {
+                    p.pan_by(-8);
+                }
+            }
+            KeyCode::Char('s') => {
+                self.state.diff_split = !self.state.diff_split;
+                let _ = self.state.save();
+                if let Some(p) = &mut self.graph.preview {
+                    p.split = self.state.diff_split;
+                }
+            }
+            KeyCode::Char('y') => {
+                if let Some(h) = g.selected_hash().map(str::to_string) {
+                    notify::copy(&h);
+                    self.toast(format!("Copied {h}"));
+                }
+            }
+            KeyCode::Esc => {
+                if g.expanded() {
+                    g.collapsed = true;
+                    g.file = None;
+                } else {
+                    self.focus = Focus::List;
+                }
+            }
+            KeyCode::Char('t') => self.toggle_graph(),
+            KeyCode::Char('d') => self.open_diff(),
+            KeyCode::Char('n') => self.open_prompt(false),
+            KeyCode::Char('/') => self.open_switcher(),
+            KeyCode::Char(',') => self.modal = Some(Modal::Settings(SettingsModal::new())),
+            KeyCode::Char('q') => self.request_quit(),
+            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.request_quit()
+            }
+            _ => {}
         }
     }
 
@@ -1225,6 +1540,7 @@ impl App {
                 }
             }
             KeyCode::Char('d') => self.open_diff(),
+            KeyCode::Char('t') => self.toggle_graph(),
             KeyCode::Char('/') => self.open_switcher(),
             KeyCode::Char(',') => self.modal = Some(Modal::Settings(SettingsModal::new())),
             KeyCode::Char('q') => self.request_quit(),
@@ -1280,6 +1596,22 @@ impl App {
                     && y < self.list_rect.y + self.list_rect.height
                 {
                     self.drag = Drag::Separator;
+                } else if inside(self.graph_rect) {
+                    self.focus = Focus::Graph;
+                    let g = &mut self.graph;
+                    let i = g.offset + y.saturating_sub(self.graph_rect.y + 1) as usize;
+                    match g.lines().get(i) {
+                        Some(GraphLine::Row(r)) if g.rows[*r].commit.is_some() => {
+                            if *r != g.sel {
+                                g.sel = *r;
+                                g.collapsed = false;
+                            }
+                            g.file = None;
+                        }
+                        Some(GraphLine::File(f)) => g.file = Some(*f),
+                        _ => {}
+                    }
+                    self.sync_graph();
                 } else if inside(self.list_rect) {
                     self.focus = Focus::List;
                     if let Some((_, key)) = self.list_rows.iter().find(|(ry, _)| *ry == y).cloned()
@@ -1349,7 +1681,19 @@ impl App {
             }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                 let up = m.kind == MouseEventKind::ScrollUp;
-                if inside(self.list_rect) {
+                if inside(self.graph_rect) {
+                    if up {
+                        self.graph.up();
+                    } else {
+                        self.graph.down();
+                    }
+                    self.sync_graph();
+                } else if self.focus == Focus::Graph
+                    && inside(self.pane_rect)
+                    && let Some(p) = &mut self.graph.preview
+                {
+                    p.scroll_by(if up { -3 } else { 3 });
+                } else if inside(self.list_rect) {
                     self.move_selection(if up { -1 } else { 1 });
                 } else if inside(self.pane_rect) {
                     let Some(i) = cur else { return };
