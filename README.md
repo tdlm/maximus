@@ -21,12 +21,38 @@ or
 curl -LsSf https://github.com/tdlm/maximus/releases/latest/download/maximus-installer.sh | sh
 ```
 
+The curl installer puts `maximus` in `~/.local/bin`; make sure that's on your PATH.
+
 You also need the [`claude` CLI](https://code.claude.com/docs/en/setup) and `git` on your PATH.
 
+| | Homebrew | curl installer |
+|---|---|---|
+| Upgrade | `brew upgrade maximus` | re-run the install command |
+| Uninstall | `brew uninstall maximus` | `rm ~/.local/bin/maximus` |
+
+Settings and state live in `~/.config/maximus` and `~/.local/state/maximus`; delete those too
+for a clean uninstall.
+
+## Quick start
+
 ```sh
-maximus            # adds the current git repo as a project on first run
-maximus ~/Dev/app  # add a specific folder
+maximus            # run inside a git repo to add it as a project
+maximus ~/Dev/app  # or add a specific folder
 ```
+
+1. `ctrl+p`, type part of a folder name, `enter` to add it (folders come from `~/Dev` by default;
+   change it in Settings → General → Folder search roots, or type a path like `~/work/api`).
+2. `ctrl+l`, type a task, `enter` — claude starts working in a pane on the right.
+3. `alt+↓` jumps to whichever session needs you; `ctrl+g` shows what it changed.
+
+**First run:** sessions are the real `claude` CLI, so if you haven't used it in a terminal before,
+the first pane shows claude's own setup (theme, login) and later a "trust this folder" prompt for
+each new folder or worktree. Finish those in the pane once; maximus shows the session as idle
+until claude starts on your prompt.
+
+**Linux:** everything works the same except desktop notifications (macOS only; the terminal bell
+still rings), the badge (iTerm2 only), and copy, which uses OSC 52 and so needs a terminal that
+allows clipboard access.
 
 ## Build from source
 
