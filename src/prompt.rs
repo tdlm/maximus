@@ -328,7 +328,8 @@ impl Prompt {
 
     pub fn draw(&mut self, f: &mut Frame, area: Rect, t: &Theme) {
         let w = (area.width * 6 / 10).clamp(50.min(area.width), 100);
-        let inner_w = w.saturating_sub(4) as usize;
+        // Borders, the text area's side padding, and the "› " prefix.
+        let inner_w = w.saturating_sub(6) as usize;
         let (lines, (crow, ccol)) = self.text.layout(inner_w);
         let text_h = (lines.len() as u16).clamp(3, 12);
         let h = text_h + 6;
