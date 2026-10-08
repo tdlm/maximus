@@ -187,18 +187,40 @@ impl TextInput {
         let mut col = 0;
         let mut cur = (0, 0);
         for (i, ch) in self.text.char_indices() {
-            if i == self.cursor {
-                cur = (lines.len() - 1, col);
-            }
             if ch == '\n' {
+                if i == self.cursor {
+                    cur = (lines.len() - 1, col);
+                }
                 lines.push(String::new());
                 col = 0;
                 continue;
             }
             let w = ch.width().unwrap_or(0);
             if col + w > width {
-                lines.push(String::new());
-                col = 0;
+                // Carry the partial word after the line's last space onto the next line;
+                // a word longer than the whole line is still split mid-word.
+                let row = lines.len() - 1;
+                let line = &mut lines[row];
+                let tail = match line.rfind(' ') {
+                    Some(p) if ch != ' ' => line.split_off(p + 1),
+                    _ => String::new(),
+                };
+                let tail_w: usize = tail.chars().map(|c| c.width().unwrap_or(0)).sum();
+                if self.cursor < i && cur.0 == row && cur.1 >= col - tail_w {
+                    cur = (row + 1, cur.1 - (col - tail_w));
+                }
+                lines.push(tail);
+                col = tail_w;
+                // A space that lands on the break is swallowed by it.
+                if ch == ' ' {
+                    if i == self.cursor {
+                        cur = (row + 1, 0);
+                    }
+                    continue;
+                }
+            }
+            if i == self.cursor {
+                cur = (lines.len() - 1, col);
             }
             lines.last_mut().unwrap().push(ch);
             col += w;
@@ -211,5 +233,47 @@ impl TextInput {
             cur = (lines.len() - 1, col);
         }
         (lines, cur)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(text: &str, cursor: usize) -> TextInput {
+        TextInput {
+            text: text.into(),
+            cursor,
+            multiline: true,
+        }
+    }
+
+    #[test]
+    fn layout_wraps_at_word_boundaries() {
+        let (lines, _) = input("hello brave world", 0).layout(10);
+        assert_eq!(lines, ["hello ", "brave ", "world"]);
+    }
+
+    #[test]
+    fn layout_splits_words_longer_than_the_line() {
+        let (lines, _) = input("abcdefghijkl", 0).layout(5);
+        assert_eq!(lines, ["abcde", "fghij", "kl"]);
+    }
+
+    #[test]
+    fn layout_follows_the_cursor_onto_the_wrapped_word() {
+        // Cursor on the "w" of "world".
+        let (_, cur) = input("hello world", 6).layout(8);
+        assert_eq!(cur, (1, 0));
+        // Cursor at the end.
+        let (_, cur) = input("hello world", 11).layout(8);
+        assert_eq!(cur, (1, 5));
+    }
+
+    #[test]
+    fn layout_swallows_a_space_at_the_break() {
+        let (lines, cur) = input("hello world", 5).layout(5);
+        assert_eq!(lines, ["hello", "world"]);
+        assert_eq!(cur, (1, 0));
     }
 }
