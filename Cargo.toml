@@ -1,6 +1,6 @@
 [package]
 name = "maximus"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A keyboard-first TUI for running Claude Code sessions across many projects"
 repository = "https://github.com/tdlm/maximus"
