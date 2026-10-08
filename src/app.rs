@@ -1092,16 +1092,8 @@ impl App {
                         .unwrap()
                         .screen()
                         .bracketed_paste();
-                    let mut bytes = Vec::new();
-                    if bracketed {
-                        bytes.extend_from_slice(b"\x1b[200~");
-                    }
-                    bytes.extend_from_slice(s.replace("\r\n", "\r").replace('\n', "\r").as_bytes());
-                    if bracketed {
-                        bytes.extend_from_slice(b"\x1b[201~");
-                    }
                     self.sessions[i].scroll = 0;
-                    self.sessions[i].write(&bytes);
+                    self.sessions[i].write(&session::paste_bytes(s, bracketed));
                 }
             }
         }

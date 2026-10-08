@@ -143,16 +143,6 @@ impl Session {
     }
 
     pub fn spawn(&mut self, l: Launch, tx: Sender<AppEvent>) -> Result<()> {
-        let (rows, cols) = (l.size.0.max(5), l.size.1.max(20));
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .context("opening pty")?;
-
         let mut cmd = CommandBuilder::new(l.claude);
         if l.resume {
             cmd.args(["--resume", &self.id]);
@@ -177,70 +167,131 @@ impl Session {
             cmd.arg(p);
         }
         cmd.cwd(&self.cwd);
-        for k in [
-            "TERM_PROGRAM",
-            "TERM_PROGRAM_VERSION",
-            "ITERM_SESSION_ID",
-            "LC_TERMINAL",
-            "LC_TERMINAL_VERSION",
-        ] {
-            cmd.env_remove(k);
-        }
-        // If maximus itself runs inside a Claude Code session, don't let the children think
-        // they're that session's subprocesses. User config (API keys, Bedrock, etc.) passes through.
-        for (k, _) in std::env::vars_os() {
-            let k = k.to_string_lossy();
-            let host_session = k == "CLAUDECODE"
-                || k == "CLAUDE_PID"
-                || k == "CLAUDE_EFFORT"
-                || k == "AI_AGENT"
-                || k.starts_with("CLAUDE_AGENT_SDK")
-                || k.starts_with("CLAUDE_CODE_SESSION")
-                || k.starts_with("CLAUDE_CODE_SDK")
-                || k.starts_with("CLAUDE_CODE_MESSAGING")
-                || k.starts_with("CLAUDE_CODE_HOST")
-                || k.starts_with("CLAUDE_CODE_OAUTH")
-                || matches!(
-                    k.as_ref(),
-                    "CLAUDE_CODE_ENTRYPOINT"
-                        | "CLAUDE_CODE_CHILD_SESSION"
-                        | "CLAUDE_CODE_EXECPATH"
-                        | "CLAUDE_CODE_DESKTOP_APP_VERSION"
-                        | "CLAUDE_CODE_TERMINAL_MCP_TOOLS"
-                        | "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
-                        | "CLAUDE_CODE_EAGER_FLUSH"
-                        | "CLAUDE_CODE_REPORT_FINDINGS"
-                        | "CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES"
-                        | "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"
-                        | "CLAUDE_CODE_ORGANIZATION_UUID"
-                        | "CLAUDE_CODE_ACCOUNT_UUID"
-                        | "CLAUDE_CODE_USER_EMAIL"
-                );
-            if host_session {
-                cmd.env_remove(k.as_ref());
-            }
-        }
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
         cmd.env("MAXIMUS_SESSION", &self.id);
         cmd.env("MAXIMUS_SOCK", l.sock);
 
-        let mut child = pair.slave.spawn_command(cmd).context("spawning claude")?;
+        self.generation += 1;
+        let exited = AppEvent::Exited(self.id.clone(), self.generation);
+        let colors = (l.term_bg, l.term_fg);
+        self.pty = Some(Pty::spawn(cmd, l.size, &self.parser, colors, tx, exited)?);
+        self.scroll = 0;
+        // Stays idle until claude's UserPromptSubmit hook confirms it picked up the prompt
+        // (first-run/trust dialogs can block it).
+        self.status = Status::Idle;
+        self.last_change = Instant::now();
+        self.seen = true;
+        Ok(())
+    }
+
+    pub fn write(&self, bytes: &[u8]) {
+        if let Some(pty) = &self.pty {
+            pty.write(bytes);
+        }
+    }
+
+    pub fn resize(&mut self, rows: u16, cols: u16) {
+        if let Some(pty) = &mut self.pty {
+            pty.resize(rows, cols, &self.parser);
+        }
+    }
+
+    pub fn kill(&mut self) {
+        if let Some(mut pty) = self.pty.take() {
+            pty.kill();
+        }
+        self.set_status(Status::Stopped);
+    }
+}
+
+/// Strips the parent terminal's identity and any host Claude Code session from `cmd`'s
+/// environment, so the child sees a plain xterm.
+fn clean_env(cmd: &mut CommandBuilder) {
+    for k in [
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "ITERM_SESSION_ID",
+        "LC_TERMINAL",
+        "LC_TERMINAL_VERSION",
+    ] {
+        cmd.env_remove(k);
+    }
+    // If maximus itself runs inside a Claude Code session, don't let the children think
+    // they're that session's subprocesses. User config (API keys, Bedrock, etc.) passes through.
+    for (k, _) in std::env::vars_os() {
+        let k = k.to_string_lossy();
+        let host_session = k == "CLAUDECODE"
+            || k == "CLAUDE_PID"
+            || k == "CLAUDE_EFFORT"
+            || k == "AI_AGENT"
+            || k.starts_with("CLAUDE_AGENT_SDK")
+            || k.starts_with("CLAUDE_CODE_SESSION")
+            || k.starts_with("CLAUDE_CODE_SDK")
+            || k.starts_with("CLAUDE_CODE_MESSAGING")
+            || k.starts_with("CLAUDE_CODE_HOST")
+            || k.starts_with("CLAUDE_CODE_OAUTH")
+            || matches!(
+                k.as_ref(),
+                "CLAUDE_CODE_ENTRYPOINT"
+                    | "CLAUDE_CODE_CHILD_SESSION"
+                    | "CLAUDE_CODE_EXECPATH"
+                    | "CLAUDE_CODE_DESKTOP_APP_VERSION"
+                    | "CLAUDE_CODE_TERMINAL_MCP_TOOLS"
+                    | "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
+                    | "CLAUDE_CODE_EAGER_FLUSH"
+                    | "CLAUDE_CODE_REPORT_FINDINGS"
+                    | "CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES"
+                    | "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING"
+                    | "CLAUDE_CODE_ORGANIZATION_UUID"
+                    | "CLAUDE_CODE_ACCOUNT_UUID"
+                    | "CLAUDE_CODE_USER_EMAIL"
+            );
+        if host_session {
+            cmd.env_remove(k.as_ref());
+        }
+    }
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+}
+
+impl Pty {
+    /// Runs `cmd` in a new pty of `size` (rows, cols), feeding its output into a fresh
+    /// `parser` and sending `exited` once the process ends. `colors` (bg, fg) answer the
+    /// program's color queries.
+    pub fn spawn(
+        mut cmd: CommandBuilder,
+        size: (u16, u16),
+        parser: &Arc<Mutex<vt100::Parser>>,
+        colors: ((u8, u8, u8), (u8, u8, u8)),
+        tx: Sender<AppEvent>,
+        exited: AppEvent,
+    ) -> Result<Self> {
+        let (rows, cols) = (size.0.max(5), size.1.max(20));
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .context("opening pty")?;
+        clean_env(&mut cmd);
+        let program = cmd.get_argv()[0].to_string_lossy().into_owned();
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .with_context(|| format!("spawning {program}"))?;
         drop(pair.slave);
         let killer = child.clone_killer();
         let mut reader = pair.master.try_clone_reader()?;
         let writer: Arc<Mutex<Box<dyn Write + Send>>> =
             Arc::new(Mutex::new(pair.master.take_writer()?));
 
-        *self.parser.lock().unwrap() = vt100::Parser::new(rows, cols, SCROLLBACK);
-        self.scroll = 0;
-        self.generation += 1;
-        let generation = self.generation;
+        *parser.lock().unwrap() = vt100::Parser::new(rows, cols, SCROLLBACK);
 
-        let parser = self.parser.clone();
+        let parser = parser.clone();
         let reply = writer.clone();
         let tx2 = tx.clone();
-        let (bg, fg) = (l.term_bg, l.term_fg);
+        let (bg, fg) = colors;
         thread::spawn(move || {
             let mut buf = [0u8; 16384];
             let mut q = QueryScanner::default();
@@ -264,56 +315,57 @@ impl Session {
                 }
             }
         });
-        let id = self.id.clone();
         thread::spawn(move || {
             let _ = child.wait();
-            let _ = tx.send(AppEvent::Exited(id, generation));
+            let _ = tx.send(exited);
         });
 
-        self.pty = Some(Pty {
+        Ok(Self {
             master: pair.master,
             writer,
             killer,
             size: (rows, cols),
-        });
-        // Stays idle until claude's UserPromptSubmit hook confirms it picked up the prompt
-        // (first-run/trust dialogs can block it).
-        self.status = Status::Idle;
-        self.last_change = Instant::now();
-        self.seen = true;
-        Ok(())
+        })
     }
 
     pub fn write(&self, bytes: &[u8]) {
-        if let Some(pty) = &self.pty {
-            let mut w = pty.writer.lock().unwrap();
-            let _ = w.write_all(bytes);
-            let _ = w.flush();
-        }
+        let mut w = self.writer.lock().unwrap();
+        let _ = w.write_all(bytes);
+        let _ = w.flush();
     }
 
-    pub fn resize(&mut self, rows: u16, cols: u16) {
+    /// Resizes the pty and `parser` to fit a pane of `rows` x `cols`.
+    pub fn resize(&mut self, rows: u16, cols: u16, parser: &Mutex<vt100::Parser>) {
         let (rows, cols) = (rows.max(5), cols.max(20));
-        if let Some(pty) = &mut self.pty
-            && pty.size != (rows, cols)
-        {
-            pty.size = (rows, cols);
-            let _ = pty.master.resize(PtySize {
+        if self.size != (rows, cols) {
+            self.size = (rows, cols);
+            let _ = self.master.resize(PtySize {
                 rows,
                 cols,
                 pixel_width: 0,
                 pixel_height: 0,
             });
-            self.parser.lock().unwrap().set_size(rows, cols);
+            parser.lock().unwrap().set_size(rows, cols);
         }
     }
 
     pub fn kill(&mut self) {
-        if let Some(mut pty) = self.pty.take() {
-            let _ = pty.killer.kill();
-        }
-        self.set_status(Status::Stopped);
+        let _ = self.killer.kill();
     }
+}
+
+/// Wraps pasted text the way a terminal would: newlines as carriage returns, inside
+/// bracketed-paste markers when the program asked for them.
+pub fn paste_bytes(s: &str, bracketed: bool) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    if bracketed {
+        bytes.extend_from_slice(b"\x1b[200~");
+    }
+    bytes.extend_from_slice(s.replace("\r\n", "\r").replace('\n', "\r").as_bytes());
+    if bracketed {
+        bytes.extend_from_slice(b"\x1b[201~");
+    }
+    bytes
 }
 
 /// Answers the handful of terminal queries TUI programs block on (DA1, DSR, OSC 10/11).
