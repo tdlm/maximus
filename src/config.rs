@@ -203,6 +203,8 @@ pub struct State {
     pub diff_tree_width: u16,
     pub diff_split: bool,
     pub graph_open: bool,
+    /// Graph panel height in rows; 0 sizes it automatically.
+    pub graph_height: u16,
     pub sessions: Vec<SessionRecord>,
 }
 
@@ -214,6 +216,7 @@ impl Default for State {
             diff_tree_width: 36,
             diff_split: true,
             graph_open: true,
+            graph_height: 0,
             sessions: vec![],
         }
     }
