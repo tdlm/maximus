@@ -135,6 +135,7 @@ pub struct Keys {
     pub focus_pane: String,
     pub graph: String,
     pub commit: String,
+    pub terminal: String,
 }
 
 impl Default for Keys {
@@ -150,6 +151,7 @@ impl Default for Keys {
             focus_pane: "alt+right".into(),
             graph: "ctrl+q".into(),
             commit: "ctrl+k".into(),
+            terminal: "ctrl+t".into(),
         }
     }
 }

@@ -20,6 +20,7 @@ use crate::{
     session::{self, Session, Status},
     settings::{SettingsAction, SettingsModal},
     switcher::{Action, Cmd, Item, Switcher},
+    terminal::Terminal,
     textinput::TextInput,
     theme::{self, THEMES, Theme},
     ui,
@@ -34,6 +35,8 @@ pub enum AppEvent {
     Graph(PathBuf, Vec<GraphRow>),
     /// A background commit in this checkout finished: the short hash, or git's error.
     Committed(PathBuf, Result<String, String>),
+    /// The shell of the terminal with this id exited.
+    ShellExited(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,6 +82,8 @@ pub enum Modal {
     Settings(SettingsModal),
     Confirm(Confirm),
     Rename(Rename),
+    /// Shows the terminal with this id.
+    Terminal(u64),
 }
 
 pub struct GlobalKeys {
@@ -92,6 +97,7 @@ pub struct GlobalKeys {
     pub focus_pane: KeySet,
     pub graph: KeySet,
     pub commit: KeySet,
+    pub terminal: KeySet,
 }
 
 impl GlobalKeys {
@@ -108,6 +114,7 @@ impl GlobalKeys {
             focus_pane: KeySet::parse(&k.focus_pane),
             graph: KeySet::parse(&k.graph),
             commit: KeySet::parse(&k.commit),
+            terminal: KeySet::parse(&k.terminal),
         }
     }
 }
@@ -262,6 +269,9 @@ pub struct App {
     pub theme: &'static Theme,
     pub keys: GlobalKeys,
     pub sessions: Vec<Session>,
+    /// Shells opened with the terminal key, shown or hidden; at most one per checkout.
+    pub terminals: Vec<Terminal>,
+    next_terminal: u64,
     pub selected: Option<RowKey>,
     pub current: Option<String>,
     pub focus: Focus,
@@ -309,6 +319,8 @@ impl App {
             cfg,
             state,
             sessions,
+            terminals: vec![],
+            next_terminal: 0,
             selected: None,
             current: None,
             focus: Focus::List,
@@ -411,8 +423,9 @@ impl App {
         }
     }
 
-    /// The checkout the graph follows: the current session's, else the selected project.
-    fn graph_dir(&self) -> Option<PathBuf> {
+    /// The checkout the graph, diff viewer and terminal follow: the current session's, else
+    /// the selected project.
+    fn checkout_dir(&self) -> Option<PathBuf> {
         self.current
             .as_ref()
             .and_then(|c| self.session(c))
@@ -425,7 +438,7 @@ impl App {
         if !self.state.graph_open {
             return false;
         }
-        let dir = self.graph_dir();
+        let dir = self.checkout_dir();
         let g = &mut self.graph;
         let moved = dir != g.dir;
         if moved {
@@ -824,6 +837,13 @@ impl App {
         for id in &self.worktree_sessions(wt) {
             self.close_session(id);
         }
+        if let Ok(dir) = wt.path.canonicalize() {
+            for t in &mut self.terminals {
+                if t.cwd.canonicalize().is_ok_and(|c| c == dir) {
+                    t.pty.kill();
+                }
+            }
+        }
         match git::remove_worktree(project, wt, !merge) {
             Err(e) => self.toast(format!("Removing the worktree failed: {e:#}")),
             Ok(()) => match base {
@@ -847,6 +867,9 @@ impl App {
         self.save();
         for s in &mut self.sessions {
             s.kill();
+        }
+        for t in &mut self.terminals {
+            t.pty.kill();
         }
         if self.cfg.notifications.badge {
             notify::badge("");
@@ -876,6 +899,12 @@ impl App {
             AppEvent::Hook(m) => self.handle_hook(m),
             AppEvent::Folders(f) => self.folders = f,
             AppEvent::Committed(root, res) => self.commit_finished(root, res),
+            AppEvent::ShellExited(id) => {
+                self.terminals.retain(|t| t.id != id);
+                if matches!(self.modal, Some(Modal::Terminal(m)) if m == id) {
+                    self.close_modal();
+                }
+            }
             AppEvent::Graph(dir, rows) => {
                 let g = &mut self.graph;
                 if g.dir.as_ref() == Some(&dir) {
@@ -1081,6 +1110,12 @@ impl App {
             Some(Modal::Settings(st)) => st.paste(s),
             Some(Modal::Rename(r)) => r.input.insert_str(s),
             Some(Modal::Diff(d)) => d.paste(s),
+            Some(Modal::Terminal(id)) => {
+                if let Some(t) = self.terminals.iter_mut().find(|t| t.id == *id) {
+                    let bracketed = t.parser.lock().unwrap().screen().bracketed_paste();
+                    t.write(&session::paste_bytes(s, bracketed));
+                }
+            }
             Some(_) => {}
             None => {
                 if self.focus == Focus::Pane
@@ -1159,6 +1194,10 @@ impl App {
         items.push(Item {
             detail: k.commit.short(),
             ..cmd("Commit changes".into(), Cmd::Commit)
+        });
+        items.push(Item {
+            detail: k.terminal.short(),
+            ..cmd("Open terminal".into(), Cmd::Terminal)
         });
         items.push(Item {
             detail: k.settings.short(),
@@ -1251,13 +1290,7 @@ impl App {
 
     /// Opens the diff viewer on the current session's checkout, in commit mode if `commit`.
     fn open_diff(&mut self, commit: bool) {
-        let dir = self
-            .current
-            .as_ref()
-            .and_then(|c| self.session(c))
-            .map(|s| s.cwd.clone())
-            .or_else(|| self.selected_project());
-        let Some(dir) = dir else {
+        let Some(dir) = self.checkout_dir() else {
             self.toast("Nothing to diff");
             return;
         };
@@ -1316,6 +1349,52 @@ impl App {
         self.modal = Some(Modal::Rename(Rename { id, input }));
     }
 
+    /// Shows the shell for the current checkout, starting one if it has none.
+    fn open_terminal(&mut self) {
+        let Some(dir) = self.checkout_dir() else {
+            self.toast("Add a project first");
+            return;
+        };
+        let id = match self.terminals.iter().find(|t| t.cwd == dir) {
+            Some(t) => t.id,
+            None => {
+                self.next_terminal += 1;
+                let id = self.next_terminal;
+                let (w, h) = crossterm::terminal::size().unwrap_or((120, 40));
+                let r = ui::terminal_rect(Rect::new(0, 0, w, h));
+                let size = (r.height.saturating_sub(2), r.width.saturating_sub(2));
+                let colors = (Theme::rgb_of(self.theme.bg), Theme::rgb_of(self.theme.fg));
+                match Terminal::spawn(id, dir, size, colors, self.tx.clone()) {
+                    Ok(t) => self.terminals.push(t),
+                    Err(e) => return self.toast(format!("Failed to start a shell: {e:#}")),
+                }
+                id
+            }
+        };
+        self.modal = Some(Modal::Terminal(id));
+    }
+
+    /// Sends a key to the open terminal; shift+PgUp/PgDn scroll it back instead.
+    fn terminal_key(&mut self, id: u64, k: KeyEvent) {
+        let Some(t) = self.terminals.iter_mut().find(|t| t.id == id) else {
+            return;
+        };
+        let half = (t.pty.size.0 as usize / 2).max(1);
+        match k.code {
+            KeyCode::PageUp if k.modifiers.contains(KeyModifiers::SHIFT) => t.scroll += half,
+            KeyCode::PageDown if k.modifiers.contains(KeyModifiers::SHIFT) => {
+                t.scroll = t.scroll.saturating_sub(half)
+            }
+            _ => {
+                let app_cursor = t.parser.lock().unwrap().screen().application_cursor();
+                let bytes = keys::encode(&k, app_cursor);
+                if !bytes.is_empty() {
+                    t.write(&bytes);
+                }
+            }
+        }
+    }
+
     /// Saves the open diff viewer's tree width and split mode when they changed, so they
     /// survive even if maximus is killed with the viewer open.
     fn keep_diff_layout(&mut self) {
@@ -1353,6 +1432,7 @@ impl App {
                 Cmd::NewWorktree => self.open_prompt(true),
                 Cmd::Diff => self.open_diff(false),
                 Cmd::Commit => self.open_diff(true),
+                Cmd::Terminal => self.open_terminal(),
                 Cmd::Settings => self.modal = Some(Modal::Settings(SettingsModal::new())),
                 Cmd::RemoveProject(p) => self.request_remove_project(p),
                 Cmd::CloseSession(id) => self.request_close_session(id),
@@ -1379,13 +1459,18 @@ impl App {
     }
 
     fn request_quit(&mut self) {
-        let live = self.live_count();
-        if live > 0 {
+        let plural = |n: usize, what: &str| format!("{n} {what}{}", if n == 1 { "" } else { "s" });
+        let running: Vec<String> = [
+            (self.live_count(), "session"),
+            (self.terminals.len(), "terminal"),
+        ]
+        .into_iter()
+        .filter(|&(n, _)| n > 0)
+        .map(|(n, what)| plural(n, what))
+        .collect();
+        if !running.is_empty() {
             self.modal = Some(Modal::Confirm(Confirm {
-                message: format!(
-                    "{live} session{} running. Stop and quit?",
-                    if live == 1 { "" } else { "s" }
-                ),
+                message: format!("{} running. Stop and quit?", running.join(" and ")),
                 action: ConfirmAction::Quit,
             }));
         } else {
@@ -1460,6 +1545,14 @@ impl App {
                     }
                     _ => {}
                 },
+                Modal::Terminal(id) => {
+                    let id = *id;
+                    if self.keys.terminal.matches(&k) {
+                        self.close_modal();
+                    } else {
+                        self.terminal_key(id, k);
+                    }
+                }
                 Modal::Rename(r) => match k.code {
                     KeyCode::Enter => {
                         let name = r.input.text.trim().to_string();
@@ -1494,6 +1587,9 @@ impl App {
         }
         if g.commit.matches(&k) {
             return self.open_diff(true);
+        }
+        if g.terminal.matches(&k) {
+            return self.open_terminal();
         }
         if g.settings.matches(&k) {
             self.modal = Some(Modal::Settings(SettingsModal::new()));
@@ -1739,6 +1835,25 @@ impl App {
                 Modal::Settings(s) => {
                     if let SettingsAction::Changed = s.handle_mouse(m, &mut self.cfg) {
                         self.settings_changed();
+                    }
+                }
+                Modal::Terminal(id) => {
+                    let up = match m.kind {
+                        MouseEventKind::ScrollUp => true,
+                        MouseEventKind::ScrollDown => false,
+                        _ => return,
+                    };
+                    let Some(t) = self.terminals.iter_mut().find(|t| t.id == *id) else {
+                        return;
+                    };
+                    // Full-screen programs get arrow keys; a plain shell scrolls back.
+                    if t.parser.lock().unwrap().screen().alternate_screen() {
+                        let seq: &[u8] = if up { b"\x1b[A" } else { b"\x1b[B" };
+                        t.write(&seq.repeat(3));
+                    } else if up {
+                        t.scroll += 3;
+                    } else {
+                        t.scroll = t.scroll.saturating_sub(3);
                     }
                 }
                 _ => {}

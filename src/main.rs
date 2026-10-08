@@ -10,6 +10,7 @@ mod session;
 mod settings;
 mod switcher;
 mod syntax;
+mod terminal;
 mod textinput;
 mod theme;
 mod ui;

@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{App, Focus, GraphLine, Modal, RowKey},
+    config::tilde,
     session::{Session, Status},
     theme::Theme,
 };
@@ -169,6 +170,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         },
     );
 
+    if let Some(Modal::Terminal(id)) = app.modal {
+        draw_terminal(f, app, area, id);
+    }
     let theme = app.theme;
     match &mut app.modal {
         Some(Modal::Switcher(s)) => s.draw(f, area, theme),
@@ -247,7 +251,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             );
             f.set_cursor_position((inner.x + 3 + ccol as u16, inner.y));
         }
-        None => {}
+        Some(Modal::Terminal(_)) | None => {}
     }
 }
 
@@ -692,6 +696,66 @@ fn draw_pane(f: &mut Frame, app: &mut App) {
         f.render_widget(
             Paragraph::new(msg).style(Style::default().bg(t.surface).fg(t.yellow)),
             r,
+        );
+    }
+}
+
+/// Where the terminal overlay sits on a screen of `area`.
+pub fn terminal_rect(area: Rect) -> Rect {
+    centered(area, 96, 94)
+}
+
+fn draw_terminal(f: &mut Frame, app: &mut App, area: Rect, id: u64) {
+    let t = app.theme;
+    let hide = app.keys.terminal.short();
+    let Some(term) = app.terminals.iter_mut().find(|x| x.id == id) else {
+        return;
+    };
+    let r = terminal_rect(area);
+    f.render_widget(Clear, r);
+    let key = |s: String| {
+        Span::styled(
+            s,
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        )
+    };
+    let txt = |s: &str| Span::styled(s.to_string(), Style::default().fg(t.muted));
+    let block = modal_block(&format!(" Terminal · {} ", tilde(&term.cwd)), t)
+        .style(Style::default().bg(t.bg).fg(t.fg))
+        .title_bottom(Line::from(vec![
+            txt(" "),
+            key(hide),
+            txt(" hide · "),
+            key("exit".into()),
+            txt(" close "),
+        ]));
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+
+    // Keep the pty sized to the overlay.
+    term.pty.resize(inner.height, inner.width, &term.parser);
+    let mut parser = term.parser.lock().unwrap();
+    parser.set_scrollback(term.scroll);
+    term.scroll = parser.screen().scrollback();
+    let screen = parser.screen();
+    draw_screen(f, screen, inner, t, |_, _| false);
+    if term.scroll == 0 && !screen.hide_cursor() {
+        let (cr, cc) = screen.cursor_position();
+        if cr < inner.height && cc < inner.width {
+            f.set_cursor_position((inner.x + cc, inner.y + cr));
+        }
+    }
+    if term.scroll > 0 {
+        let tag = format!(" ↑ {} lines · ⇧PgDn / scroll to return ", term.scroll);
+        let w = (tag.chars().count() as u16).min(inner.width);
+        f.render_widget(
+            Paragraph::new(tag).style(Style::default().bg(t.accent).fg(t.bg)),
+            Rect {
+                x: inner.x + inner.width - w,
+                y: inner.y,
+                width: w,
+                height: 1,
+            },
         );
     }
 }
