@@ -136,3 +136,104 @@ pub fn changes(dir: &Path) -> Result<Vec<Change>> {
 pub fn head_contents(dir: &Path, path: &str) -> Option<Vec<u8>> {
     git(dir, &["show", &format!("HEAD:{path}")]).ok()
 }
+
+#[derive(Debug, Clone)]
+pub struct Commit {
+    pub hash: String,
+    /// Unix seconds.
+    pub time: u64,
+    /// Branch and tag names pointing here, as `git log %D` prints them.
+    pub refs: String,
+    pub subject: String,
+}
+
+/// One line of `git log --graph`: the graph drawing, plus the commit when the line has one.
+#[derive(Debug, Clone)]
+pub struct GraphRow {
+    pub graph: String,
+    pub commit: Option<Commit>,
+}
+
+/// The most recent `n` commits reachable from the checkout's HEAD, newest first.
+pub fn graph(dir: &Path, n: usize) -> Result<Vec<GraphRow>> {
+    let out = git(
+        dir,
+        &[
+            "log",
+            "--graph",
+            "--color=never",
+            &format!("-{n}"),
+            "--format=%x1f%h%x1f%ct%x1f%D%x1f%s",
+        ],
+    )?;
+    Ok(String::from_utf8_lossy(&out)
+        .lines()
+        .map(|l| {
+            let mut p = l.split('\x1f');
+            let graph = p.next().unwrap_or("").trim_end().to_string();
+            let commit = (|| {
+                Some(Commit {
+                    hash: p.next()?.to_string(),
+                    time: p.next()?.parse().ok()?,
+                    refs: p.next()?.to_string(),
+                    subject: p.collect::<Vec<_>>().join("\x1f"),
+                })
+            })();
+            GraphRow { graph, commit }
+        })
+        .collect())
+}
+
+/// Files a commit changed relative to its first parent (or everything, for a root commit).
+pub fn commit_files(dir: &Path, hash: &str) -> Result<Vec<Change>> {
+    let parent = format!("{hash}^");
+    let out = git(
+        dir,
+        &[
+            "diff-tree",
+            "-r",
+            "-M",
+            "--name-status",
+            "-z",
+            &parent,
+            hash,
+        ],
+    )
+    .or_else(|_| {
+        git(
+            dir,
+            &["diff-tree", "-r", "--root", "--name-status", "-z", hash],
+        )
+    })?;
+    let mut parts = out
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).to_string());
+    let mut res = Vec::new();
+    // With --root, diff-tree prints the commit hash first.
+    while let Some(code) = parts.next() {
+        let Some(status) = code.chars().next().filter(|_| code.len() <= 4) else {
+            continue;
+        };
+        let Some(first) = parts.next() else { break };
+        let (path, old_path, status) = match status {
+            'R' | 'C' => match parts.next() {
+                Some(new) => (new, Some(first), 'R'),
+                None => break,
+            },
+            'A' | 'D' => (first, None, status),
+            _ => (first, None, 'M'),
+        };
+        res.push(Change {
+            path,
+            old_path,
+            status,
+        });
+    }
+    Ok(res)
+}
+
+/// File contents at `rev`, or None if absent.
+pub fn show_file(dir: &Path, rev: &str, path: &str) -> Option<Vec<u8>> {
+    git(dir, &["show", &format!("{rev}:{path}")]).ok()
+}
