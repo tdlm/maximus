@@ -188,6 +188,42 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 inner,
             );
         }
+        Some(Modal::Rename(rn)) => {
+            let w = (area.width * 6 / 10).clamp(30, area.width);
+            let r = Rect {
+                x: area.x + (area.width - w) / 2,
+                y: area.y + area.height / 3,
+                width: w,
+                height: 5,
+            };
+            f.render_widget(Clear, r);
+            let block = modal_block(" Rename session ", theme);
+            let inner = block.inner(r);
+            f.render_widget(block, r);
+            let (lines, (_, ccol)) = rn.input.layout(inner.width.saturating_sub(4) as usize);
+            let text = lines.last().cloned().unwrap_or_default();
+            let key = |s: &'static str| {
+                Span::styled(
+                    s,
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                )
+            };
+            let txt = |s: &'static str| Span::styled(s, Style::default().fg(theme.muted));
+            f.render_widget(
+                Paragraph::new(vec![
+                    Line::from(vec![
+                        Span::styled(" › ", Style::default().fg(theme.accent)),
+                        Span::styled(text, Style::default().fg(theme.fg)),
+                    ]),
+                    Line::raw(""),
+                    Line::from(vec![key(" ⏎"), txt(" save   "), key("esc"), txt(" cancel")]),
+                ]),
+                inner,
+            );
+            f.set_cursor_position((inner.x + 3 + ccol as u16, inner.y));
+        }
         None => {}
     }
 }

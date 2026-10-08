@@ -20,6 +20,7 @@ use crate::{
     session::{self, Session, Status},
     settings::{SettingsAction, SettingsModal},
     switcher::{Action, Cmd, Item, Switcher},
+    textinput::TextInput,
     theme::{self, THEMES, Theme},
     ui,
 };
@@ -55,6 +56,11 @@ pub struct Confirm {
     pub action: ConfirmAction,
 }
 
+pub struct Rename {
+    pub id: String,
+    pub input: TextInput,
+}
+
 // Only one modal exists at a time, so variant size differences don't matter.
 #[allow(clippy::large_enum_variant)]
 pub enum Modal {
@@ -63,6 +69,7 @@ pub enum Modal {
     Diff(Box<DiffView>),
     Settings(SettingsModal),
     Confirm(Confirm),
+    Rename(Rename),
 }
 
 pub struct GlobalKeys {
@@ -761,6 +768,7 @@ impl App {
             Some(Modal::Switcher(sw)) => sw.paste(s),
             Some(Modal::Prompt(p)) => p.paste(s),
             Some(Modal::Settings(st)) => st.paste(s),
+            Some(Modal::Rename(r)) => r.input.insert_str(s),
             Some(_) => {}
             None => {
                 if self.focus == Focus::Pane
@@ -851,6 +859,10 @@ impl App {
         if let Some(id) = &self.current
             && let Some(s) = self.session(id)
         {
+            items.push(cmd(
+                format!("Rename session: {}", s.name),
+                Cmd::RenameSession(id.clone()),
+            ));
             if s.pty.is_some() {
                 items.push(cmd(
                     format!("Stop session: {}", s.name),
@@ -942,6 +954,12 @@ impl App {
         ))));
     }
 
+    fn open_rename(&mut self, id: String) {
+        let Some(s) = self.session(&id) else { return };
+        let input = TextInput::with_text(&s.name, false);
+        self.modal = Some(Modal::Rename(Rename { id, input }));
+    }
+
     fn close_modal(&mut self) {
         if let Some(Modal::Diff(d)) = &self.modal {
             self.state.diff_tree_width = d.tree_width;
@@ -973,6 +991,7 @@ impl App {
                 Cmd::Settings => self.modal = Some(Modal::Settings(SettingsModal::new())),
                 Cmd::RemoveProject(p) => self.request_remove_project(p),
                 Cmd::CloseSession(id) => self.request_close_session(id),
+                Cmd::RenameSession(id) => self.open_rename(id),
                 Cmd::ResumeSession(id) => {
                     self.resume(&id);
                     self.focus_session(&id);
@@ -1059,6 +1078,23 @@ impl App {
                         self.modal = None;
                     }
                     _ => {}
+                },
+                Modal::Rename(r) => match k.code {
+                    KeyCode::Enter => {
+                        let name = r.input.text.trim().to_string();
+                        let id = r.id.clone();
+                        self.modal = None;
+                        if !name.is_empty()
+                            && let Some(i) = self.session_idx(&id)
+                        {
+                            self.sessions[i].name = name;
+                            self.save();
+                        }
+                    }
+                    KeyCode::Esc => self.modal = None,
+                    _ => {
+                        r.input.handle_key(&k);
+                    }
                 },
             }
             return;
@@ -1181,6 +1217,11 @@ impl App {
                         }));
                     }
                     _ => {}
+                }
+            }
+            KeyCode::Char('e') => {
+                if let Some(RowKey::Session(id)) = self.selected.clone() {
+                    self.open_rename(id);
                 }
             }
             KeyCode::Char('d') => self.open_diff(),

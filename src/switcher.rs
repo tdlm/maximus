@@ -20,6 +20,7 @@ pub enum Cmd {
     Settings,
     RemoveProject(PathBuf),
     CloseSession(String),
+    RenameSession(String),
     ResumeSession(String),
     DefaultModel(String),
     Theme(&'static str),

@@ -67,7 +67,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `alt+←/→`  | Focus agent list / pane                  |
 
 Agent list: `j/k` move · `enter` open (resumes stopped) · `n` new prompt · `w` new prompt in a new
-worktree · `r` resume · `x` close session / remove project · `d` diff · `/` switcher · `,` settings · `q` quit.
+worktree · `r` resume · `e` rename session · `x` close session / remove project · `d` diff · `/` switcher · `,` settings · `q` quit.
 
 Pane: everything goes to claude. `shift+PgUp/PgDn` or the mouse wheel scrolls back; drag to select
 and copy.
