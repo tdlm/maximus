@@ -536,6 +536,55 @@ fn vt_color(c: vt100::Color, default: Color) -> Color {
     }
 }
 
+/// Paints a terminal screen into `area`, highlighting the cells `selected` picks.
+fn draw_screen(
+    f: &mut Frame,
+    screen: &vt100::Screen,
+    inner: Rect,
+    t: &Theme,
+    selected: impl Fn(u16, u16) -> bool,
+) {
+    let buf = f.buffer_mut();
+    let (rows, cols) = screen.size();
+    for row in 0..inner.height.min(rows) {
+        for col in 0..inner.width.min(cols) {
+            let Some(cell) = screen.cell(row, col) else {
+                continue;
+            };
+            if cell.is_wide_continuation() {
+                continue;
+            }
+            let mut fg = vt_color(cell.fgcolor(), t.fg);
+            let mut bg = vt_color(cell.bgcolor(), t.bg);
+            if cell.inverse() {
+                std::mem::swap(&mut fg, &mut bg);
+            }
+            let mut style = Style::default().fg(fg).bg(bg);
+            if cell.bold() {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            if cell.italic() {
+                style = style.add_modifier(Modifier::ITALIC);
+            }
+            if cell.underline() {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            if selected(row, col) {
+                style = style.bg(t.selection).fg(t.fg);
+            }
+            let contents = cell.contents();
+            let symbol = if contents.is_empty() {
+                " "
+            } else {
+                contents.as_str()
+            };
+            if let Some(c) = buf.cell_mut((inner.x + col, inner.y + row)) {
+                c.set_symbol(symbol).set_style(style);
+            }
+        }
+    }
+}
+
 fn draw_pane(f: &mut Frame, app: &mut App) {
     let t = app.theme;
     // A file picked in the commit graph takes over the pane while the graph has focus.
@@ -606,45 +655,7 @@ fn draw_pane(f: &mut Frame, app: &mut App) {
     let in_sel = |row: u16, col: u16| {
         sel.is_some_and(|((sc, sr), (ec, er))| (row, col) >= (sr, sc) && (row, col) <= (er, ec))
     };
-    let buf = f.buffer_mut();
-    let (rows, cols) = screen.size();
-    for row in 0..inner.height.min(rows) {
-        for col in 0..inner.width.min(cols) {
-            let Some(cell) = screen.cell(row, col) else {
-                continue;
-            };
-            if cell.is_wide_continuation() {
-                continue;
-            }
-            let mut fg = vt_color(cell.fgcolor(), t.fg);
-            let mut bg = vt_color(cell.bgcolor(), t.bg);
-            if cell.inverse() {
-                std::mem::swap(&mut fg, &mut bg);
-            }
-            let mut style = Style::default().fg(fg).bg(bg);
-            if cell.bold() {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            if cell.italic() {
-                style = style.add_modifier(Modifier::ITALIC);
-            }
-            if cell.underline() {
-                style = style.add_modifier(Modifier::UNDERLINED);
-            }
-            if in_sel(row, col) {
-                style = style.bg(t.selection).fg(t.fg);
-            }
-            let contents = cell.contents();
-            let symbol = if contents.is_empty() {
-                " "
-            } else {
-                contents.as_str()
-            };
-            if let Some(c) = buf.cell_mut((inner.x + col, inner.y + row)) {
-                c.set_symbol(symbol).set_style(style);
-            }
-        }
-    }
+    draw_screen(f, screen, inner, t, in_sel);
     let scrolled = s.scroll;
     let live = s.pty.is_some();
     if focused && live && scrolled == 0 && !screen.hide_cursor() {
