@@ -78,6 +78,48 @@ pub fn add_worktree(project: &Path, branch: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The linked worktree checked out at `dir`, or None for the main checkout or a non-worktree.
+pub fn linked_worktree(project: &Path, dir: &Path) -> Option<Worktree> {
+    let dir = dir.canonicalize().ok()?;
+    worktrees(project)
+        .into_iter()
+        .find(|w| !w.main && w.path.canonicalize().is_ok_and(|p| p == dir))
+}
+
+/// Merges a clean worktree's branch into the branch the main checkout is on, returning
+/// that branch. A conflicted merge is aborted so the main checkout is left as it was.
+pub fn merge_worktree(project: &Path, wt: &Worktree) -> Result<String> {
+    if !changes(&wt.path)?.is_empty() {
+        bail!("{} has uncommitted changes", wt.branch);
+    }
+    let base = current_branch(project)
+        .filter(|b| b != "HEAD")
+        .ok_or_else(|| anyhow::anyhow!("the main checkout is not on a branch"))?;
+    if let Err(e) = git(project, &["merge", "--no-edit", &wt.branch]) {
+        if git(project, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_ok() {
+            let _ = git(project, &["merge", "--abort"]);
+        }
+        bail!("merging {} into {base} failed: {e}", wt.branch);
+    }
+    Ok(base)
+}
+
+/// Deletes a worktree and its branch. Without `force`, git refuses if the worktree has
+/// changes or the branch isn't merged.
+pub fn remove_worktree(project: &Path, wt: &Worktree, force: bool) -> Result<()> {
+    let p = wt.path.to_string_lossy();
+    if force {
+        git(project, &["worktree", "remove", "--force", &p])?;
+    } else {
+        git(project, &["worktree", "remove", &p])?;
+    }
+    git(
+        project,
+        &["branch", if force { "-D" } else { "-d" }, &wt.branch],
+    )?;
+    Ok(())
+}
+
 pub fn slug(s: &str, max_words: usize) -> String {
     let words: Vec<String> = s
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -236,4 +278,72 @@ pub fn commit_files(dir: &Path, hash: &str) -> Result<Vec<Change>> {
 /// File contents at `rev`, or None if absent.
 pub fn show_file(dir: &Path, rev: &str, path: &str) -> Option<Vec<u8>> {
     git(dir, &["show", &format!("{rev}:{path}")]).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("maximus-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let main = root.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        for args in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.name", "t"],
+            &["config", "user.email", "t@t"],
+            &["commit", "-q", "--allow-empty", "-m", "init"],
+        ] {
+            git(&main, args).unwrap();
+        }
+        main
+    }
+
+    fn commit_file(dir: &Path, file: &str) {
+        std::fs::write(dir.join(file), file).unwrap();
+        git(dir, &["add", file]).unwrap();
+        git(dir, &["commit", "-q", "-m", file]).unwrap();
+    }
+
+    #[test]
+    fn merges_and_removes_a_worktree() {
+        let main = repo("merge");
+        let path = main.with_file_name("feat");
+        add_worktree(&main, "feat", &path).unwrap();
+        let wt = linked_worktree(&main, &path).unwrap();
+        assert!(linked_worktree(&main, &main).is_none());
+
+        std::fs::write(path.join("dirty"), "").unwrap();
+        assert!(merge_worktree(&main, &wt).is_err());
+        std::fs::remove_file(path.join("dirty")).unwrap();
+
+        commit_file(&path, "a");
+        assert_eq!(merge_worktree(&main, &wt).unwrap(), "main");
+        assert!(main.join("a").exists());
+        remove_worktree(&main, &wt, false).unwrap();
+        assert!(!path.exists());
+        assert!(git(&main, &["rev-parse", "--verify", "feat"]).is_err());
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
+
+    #[test]
+    fn aborts_a_conflicted_merge() {
+        let main = repo("conflict");
+        let path = main.with_file_name("feat");
+        add_worktree(&main, "feat", &path).unwrap();
+        let wt = linked_worktree(&main, &path).unwrap();
+        std::fs::write(path.join("a"), "theirs").unwrap();
+        git(&path, &["add", "a"]).unwrap();
+        git(&path, &["commit", "-q", "-m", "theirs"]).unwrap();
+        commit_file(&main, "a");
+
+        assert!(merge_worktree(&main, &wt).is_err());
+        assert!(git(&main, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_err());
+        assert!(changes(&main).unwrap().is_empty());
+
+        remove_worktree(&main, &wt, true).unwrap();
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
 }
