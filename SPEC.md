@@ -50,12 +50,13 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 | ctrl+p   | Switcher                                  |
 | ctrl+j   | New prompt                                |
 | ctrl+g   | Diff viewer for focused session's tree    |
+| ctrl+k   | Commit the focused session's changes      |
 | ctrl+s   | Settings                                  |
 | alt+↑/↓  | Prev/next session (attention order)       |
 | alt+←/→  | Focus agent list / pane                   |
 
 All rebindable in settings. Note: these keys are then unavailable to claude itself
-(e.g. ctrl+p history-prev, ctrl+j newline). ctrl+k stays with claude (kill-line).
+(e.g. ctrl+p history-prev, ctrl+j newline, ctrl+k kill-line).
 
 ## Switcher (ctrl+p)
 
@@ -109,6 +110,15 @@ Centered, nearly-full-screen modal over the main screen.
 - Left: collapsible file tree of the worktree's changes (vs HEAD, incl. untracked).
 - Right: side-by-side by default, `s` toggles unified. Syntax highlighting.
 - Draggable tree/file separator.
+
+## Commit (ctrl+k)
+
+The diff viewer in commit mode: each file in the tree gets a checkbox (all checked to start; a
+folder's toggles everything under it) and a message box spans the bottom. Enter commits exactly the
+checked files' working-tree state — new, modified, deleted and renamed — and leaves everything else
+out, including changes staged earlier, which stay staged. The commit runs in the background so slow
+hooks don't freeze the UI; a failure shows git's output and keeps the message. The viewer then
+reloads on what's left so a changeset can be split into several commits, and closes once it's clean.
 
 ## Settings (ctrl+s)
 
