@@ -20,7 +20,12 @@ use syntect::{
 use two_face::re_exports::syntect;
 use unicode_width::UnicodeWidthChar;
 
-use crate::{config::tilde, git, theme::Theme, ui};
+use crate::{
+    config::tilde,
+    git,
+    theme::{Syntax, Theme},
+    ui,
+};
 
 const MAX_BYTES: usize = 2_000_000;
 
@@ -32,6 +37,13 @@ fn syntaxes() -> &'static SyntaxSet {
 fn syn_themes() -> &'static two_face::theme::EmbeddedLazyThemeSet {
     static T: OnceLock<two_face::theme::EmbeddedLazyThemeSet> = OnceLock::new();
     T.get_or_init(two_face::theme::extra)
+}
+
+fn syn_theme(syntax: Syntax) -> SynTheme {
+    match syntax {
+        Syntax::Embedded(name) => syn_themes().get(name).clone(),
+        Syntax::Custom(custom) => custom.build(),
+    }
 }
 
 /// Warm the syntax set off the UI thread so the first diff opens instantly.
@@ -104,7 +116,7 @@ pub struct DiffView {
     file_rect: Rect,
     dragging: bool,
     error: Option<String>,
-    syntax_theme: two_face::theme::EmbeddedThemeName,
+    syntax_theme: Syntax,
 }
 
 impl DiffView {
@@ -226,7 +238,7 @@ impl DiffView {
             return;
         }
         let f = &self.files[i];
-        let theme = syn_themes().get(self.syntax_theme).clone();
+        let theme = syn_theme(self.syntax_theme);
         let fd = build_diff(&f.old, &f.new, &f.change.path, &theme);
         self.cache.insert(i, fd);
     }
@@ -698,7 +710,7 @@ impl FilePreview {
         let note = unreadable(&old, &new);
         let (old, new) = texts(note, old, new);
         let diff = note.is_none().then(|| {
-            let syn = syn_themes().get(theme.syntax).clone();
+            let syn = syn_theme(theme.syntax);
             build_diff(&old, &new, path, &syn)
         });
         Self {

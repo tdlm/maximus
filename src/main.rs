@@ -9,6 +9,7 @@ mod prompt;
 mod session;
 mod settings;
 mod switcher;
+mod syntax;
 mod textinput;
 mod theme;
 mod ui;

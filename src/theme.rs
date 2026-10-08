@@ -1,6 +1,15 @@
 use ratatui::style::Color;
 use two_face::theme::EmbeddedThemeName;
 
+use crate::syntax::{self, Custom};
+
+/// Where a theme's syntax colours come from.
+#[derive(Debug, Clone, Copy)]
+pub enum Syntax {
+    Embedded(EmbeddedThemeName),
+    Custom(&'static Custom),
+}
+
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub id: &'static str,
@@ -19,7 +28,7 @@ pub struct Theme {
     pub green: Color,
     pub add_bg: Color,
     pub del_bg: Color,
-    pub syntax: EmbeddedThemeName,
+    pub syntax: Syntax,
 }
 
 const fn rgb(hex: u32) -> Color {
@@ -43,7 +52,7 @@ pub const THEMES: &[Theme] = &[
         green: rgb(0xa6e3a1),
         add_bg: rgb(0x26352f),
         del_bg: rgb(0x3b2632),
-        syntax: EmbeddedThemeName::CatppuccinMocha,
+        syntax: Syntax::Embedded(EmbeddedThemeName::CatppuccinMocha),
     },
     Theme {
         id: "tokyo-night",
@@ -61,7 +70,7 @@ pub const THEMES: &[Theme] = &[
         green: rgb(0x9ece6a),
         add_bg: rgb(0x20303b),
         del_bg: rgb(0x37222c),
-        syntax: EmbeddedThemeName::TwoDark,
+        syntax: Syntax::Embedded(EmbeddedThemeName::TwoDark),
     },
     Theme {
         id: "gruvbox-dark",
@@ -79,7 +88,7 @@ pub const THEMES: &[Theme] = &[
         green: rgb(0xb8bb26),
         add_bg: rgb(0x32361a),
         del_bg: rgb(0x402120),
-        syntax: EmbeddedThemeName::GruvboxDark,
+        syntax: Syntax::Embedded(EmbeddedThemeName::GruvboxDark),
     },
     Theme {
         id: "nord",
@@ -97,7 +106,25 @@ pub const THEMES: &[Theme] = &[
         green: rgb(0xa3be8c),
         add_bg: rgb(0x36433f),
         del_bg: rgb(0x453640),
-        syntax: EmbeddedThemeName::Nord,
+        syntax: Syntax::Embedded(EmbeddedThemeName::Nord),
+    },
+    Theme {
+        id: "beardy-blueberry",
+        label: "Beardy Blueberry",
+        bg: rgb(0x111422),
+        surface: rgb(0x1a1e33),
+        fg: rgb(0xbcc1dc),
+        muted: rgb(0x6673b3),
+        border: rgb(0x3c4776),
+        accent: rgb(0x8eb0e6),
+        selection: rgb(0x37435d),
+        yellow: rgb(0xeacd61),
+        red: rgb(0xe35535),
+        blue: rgb(0x69c3ff),
+        green: rgb(0x3cec85),
+        add_bg: rgb(0x142c2c),
+        del_bg: rgb(0x281a22),
+        syntax: Syntax::Custom(&syntax::BEARDY_BLUEBERRY),
     },
     Theme {
         id: "catppuccin-latte",
@@ -115,7 +142,7 @@ pub const THEMES: &[Theme] = &[
         green: rgb(0x40a02b),
         add_bg: rgb(0xd5ead3),
         del_bg: rgb(0xf3d3da),
-        syntax: EmbeddedThemeName::CatppuccinLatte,
+        syntax: Syntax::Embedded(EmbeddedThemeName::CatppuccinLatte),
     },
 ];
 
