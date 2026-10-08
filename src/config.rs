@@ -49,6 +49,8 @@ pub struct Config {
     pub default_model: String,
     /// Empty string means "let claude decide".
     pub default_effort: String,
+    /// Permission mode passed to claude --permission-mode; empty lets claude decide.
+    pub default_mode: String,
     pub models: Vec<String>,
     pub project_roots: Vec<String>,
     pub worktree_dir: String,
@@ -64,6 +66,7 @@ impl Default for Config {
         Self {
             default_model: "opus".into(),
             default_effort: String::new(),
+            default_mode: String::new(),
             models: vec![
                 "fable".into(),
                 "opus".into(),

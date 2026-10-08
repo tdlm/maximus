@@ -651,6 +651,7 @@ impl App {
         let size = self.pane_size();
         let launch = session::Launch {
             claude: &self.cfg.claude_command,
+            mode: &self.cfg.default_mode,
             settings: &self.hook_settings,
             sock: &self.sock,
             prompt,
