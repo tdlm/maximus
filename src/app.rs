@@ -242,6 +242,7 @@ impl Graph {
 enum Drag {
     None,
     Separator,
+    GraphSeparator,
     Select,
     Forward,
 }
@@ -1596,6 +1597,13 @@ impl App {
                     && y < self.list_rect.y + self.list_rect.height
                 {
                     self.drag = Drag::Separator;
+                } else if self.graph_rect.height > 0
+                    && x >= self.list_rect.x
+                    && x < sep
+                    && (y == self.graph_rect.y || y + 1 == self.graph_rect.y)
+                {
+                    // The Agents bottom border or the Graph top border.
+                    self.drag = Drag::GraphSeparator;
                 } else if inside(self.graph_rect) {
                     self.focus = Focus::Graph;
                     let g = &mut self.graph;
@@ -1651,6 +1659,11 @@ impl App {
                     self.state.list_width =
                         w.clamp(18, self.list_rect.width + self.pane_rect.width - 30);
                 }
+                Drag::GraphSeparator => {
+                    let bottom = self.list_rect.y + self.list_rect.height;
+                    self.state.graph_height =
+                        ui::graph_height(bottom.saturating_sub(y), self.list_rect.height);
+                }
                 Drag::Select => {
                     let px = x.clamp(
                         self.pane_inner.x,
@@ -1670,7 +1683,7 @@ impl App {
             },
             MouseEventKind::Up(_) => {
                 match self.drag {
-                    Drag::Separator => {
+                    Drag::Separator | Drag::GraphSeparator => {
                         let _ = self.state.save();
                     }
                     Drag::Select => self.copy_selection(),
