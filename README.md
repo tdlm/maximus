@@ -89,11 +89,17 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+l`   | New prompt                               |
 | `ctrl+g`   | Diff viewer for the current session's checkout |
 | `ctrl+s`   | Settings                                 |
-| `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen) |
+| `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen); in the left column, move between Agents and Graph |
 | `alt+←/→`  | Focus agent list / pane                  |
+| `ctrl+q`   | Show/hide the commit graph               |
 
 Agent list: `j/k` move · `enter` open (resumes stopped) · `n` new prompt · `w` new prompt in a new
-worktree · `r` resume · `e` rename session · `x` close session / remove project · `d` diff · `/` switcher · `,` settings · `q` quit.
+worktree · `r` resume · `e` rename session · `x` close session / remove project · `d` diff · `t` graph · `/` switcher · `,` settings · `q` quit.
+
+Graph (commits on the current session's checkout): the selected commit expands to show its changed
+files · `j/k` move through commits and files · a selected file's diff shows on the right
+(`PgUp/PgDn` scroll, `h/l` pan, `s` split/unified) · `y` copy hash · `esc` collapse the commit,
+again to go back to Agents (or `alt+↑`) · `t` hide.
 
 Pane: everything goes to claude. `shift+PgUp/PgDn` or the mouse wheel scrolls back; drag to select
 and copy.
