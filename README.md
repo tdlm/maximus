@@ -88,6 +88,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+p`   | Switcher: sessions, projects, commands, add folder |
 | `ctrl+j`   | New prompt                               |
 | `ctrl+g`   | Diff viewer for the current session's checkout |
+| `ctrl+k`   | Commit the current session's changes     |
 | `ctrl+s`   | Settings                                 |
 | `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen); in the left column, move between Agents and Graph |
 | `alt+←/→`  | Focus agent list / pane                  |
@@ -114,7 +115,15 @@ New prompt: `enter` send · `alt/shift+enter` newline · `ctrl+p` project · `ct
 (main / existing / new) · `ctrl+o` model (←/→ effort) · `tab` rename the new branch.
 
 Diff viewer: `j/k` file · `J/K` hunk · `enter` focus file · `s` split/unified · `]`/`[` next/prev file ·
-`h/l` fold · `r` refresh · `esc` back/close.
+`h/l` fold · `r` refresh · `esc` back/close · `ctrl+k` switch to commit mode.
+
+Commit (`ctrl+k`): the diff viewer with a checkbox on every changed file, all checked, and a message
+box below. Type the message and press `enter` to commit just the checked files; `alt/shift+enter`
+adds a newline and `tab` moves to the file list, where `space` checks or unchecks a file (or a whole
+folder) and `a` toggles all. A file you staged earlier but leave unchecked stays staged and out of
+the commit. After a commit the viewer stays open on what's left, so you can split the changes into
+several commits; it closes when nothing is left. If a hook rejects the commit, its output shows on
+the right and your message is kept.
 
 Mouse: click to select/focus, drag the pane separators, scroll lists, panes and diffs.
 
