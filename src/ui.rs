@@ -491,6 +491,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
             "Focus agent list / pane",
         ),
         (k.diff.short(), "View uncommitted changes"),
+        (k.commit.short(), "Commit changes"),
         (k.graph.short(), "Show/hide the commit graph"),
         ("e".into(), "Rename the selected session"),
         ("x".into(), "Close session / remove project"),
