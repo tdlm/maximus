@@ -76,7 +76,7 @@ impl Default for Config {
             project_roots: vec!["~/Dev".into()],
             worktree_dir: "~/.local/share/maximus/worktrees".into(),
             claude_command: "claude".into(),
-            theme: "catppuccin-mocha".into(),
+            theme: crate::theme::DEFAULT_ID.into(),
             timeouts: Timeouts::default(),
             notifications: Notifications::default(),
             keys: Keys::default(),

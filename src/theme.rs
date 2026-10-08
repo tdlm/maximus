@@ -35,6 +35,9 @@ const fn rgb(hex: u32) -> Color {
     Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
+/// The theme used when none is configured or the configured id is unknown.
+pub const DEFAULT_ID: &str = "beardy-blueberry";
+
 pub const THEMES: &[Theme] = &[
     Theme {
         id: "catppuccin-mocha",
@@ -147,7 +150,11 @@ pub const THEMES: &[Theme] = &[
 ];
 
 pub fn by_id(id: &str) -> &'static Theme {
-    THEMES.iter().find(|t| t.id == id).unwrap_or(&THEMES[0])
+    THEMES
+        .iter()
+        .find(|t| t.id == id)
+        .or_else(|| THEMES.iter().find(|t| t.id == DEFAULT_ID))
+        .unwrap_or(&THEMES[0])
 }
 
 impl Theme {
@@ -156,5 +163,16 @@ impl Theme {
             Color::Rgb(r, g, b) => (r, g, b),
             _ => (0, 0, 0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_ids_fall_back_to_the_default_theme() {
+        assert_eq!(by_id(DEFAULT_ID).id, DEFAULT_ID);
+        assert_eq!(by_id("no-such-theme").id, DEFAULT_ID);
     }
 }
