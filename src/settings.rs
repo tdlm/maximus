@@ -45,6 +45,7 @@ const KEY_NAMES: &[&str] = &[
     "Previous session",
     "Focus agent list",
     "Focus pane",
+    "Toggle graph",
 ];
 
 fn key_slot(cfg: &mut Config, i: usize) -> &mut String {
@@ -57,7 +58,8 @@ fn key_slot(cfg: &mut Config, i: usize) -> &mut String {
         4 => &mut k.next_session,
         5 => &mut k.prev_session,
         6 => &mut k.focus_list,
-        _ => &mut k.focus_pane,
+        7 => &mut k.focus_pane,
+        _ => &mut k.graph,
     }
 }
 
