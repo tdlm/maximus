@@ -51,6 +51,11 @@ pub enum ConfirmAction {
     Quit,
     RemoveProject(PathBuf),
     CloseSession(String),
+    FinishWorktree {
+        project: PathBuf,
+        wt: git::Worktree,
+        merge: bool,
+    },
 }
 
 pub struct Confirm {
@@ -749,6 +754,82 @@ impl App {
         self.focus = Focus::List;
     }
 
+    /// Sessions running in the worktree at `wt.path`.
+    fn worktree_sessions(&self, wt: &git::Worktree) -> Vec<String> {
+        let Ok(dir) = wt.path.canonicalize() else {
+            return vec![];
+        };
+        self.sessions
+            .iter()
+            .filter(|s| s.cwd.canonicalize().is_ok_and(|c| c == dir))
+            .map(|s| s.id.clone())
+            .collect()
+    }
+
+    /// Asks before merging (or discarding) the worktree a session runs in.
+    fn request_finish_worktree(&mut self, id: &str, merge: bool) {
+        let Some(s) = self.session(id) else { return };
+        let Some(wt) = git::linked_worktree(&s.project, &s.cwd) else {
+            self.toast("This session isn't in a worktree");
+            return;
+        };
+        let project = s.project.clone();
+        let live = self
+            .worktree_sessions(&wt)
+            .iter()
+            .filter(|id| self.session(id).is_some_and(|s| s.pty.is_some()))
+            .count();
+        let stops = match live {
+            0 => String::new(),
+            1 => " Stops its session.".into(),
+            n => format!(" Stops {n} sessions."),
+        };
+        let message = if merge {
+            if git::changes(&wt.path).is_ok_and(|c| !c.is_empty()) {
+                self.toast(format!("{} has uncommitted changes", wt.branch));
+                return;
+            }
+            let base = git::current_branch(&project).unwrap_or_else(|| "main".into());
+            format!(
+                "Merge {} into {base} and delete the worktree?{stops}",
+                wt.branch
+            )
+        } else {
+            format!(
+                "Delete worktree {} and its unmerged work?{stops}",
+                wt.branch
+            )
+        };
+        self.modal = Some(Modal::Confirm(Confirm {
+            message,
+            action: ConfirmAction::FinishWorktree { project, wt, merge },
+        }));
+    }
+
+    /// Merges the worktree's branch (unless discarding), stops and archives its sessions,
+    /// then deletes the worktree and branch.
+    fn finish_worktree(&mut self, project: &Path, wt: &git::Worktree, merge: bool) {
+        let base = if merge {
+            match git::merge_worktree(project, wt) {
+                Ok(b) => Some(b),
+                Err(e) => return self.toast(format!("{e:#}")),
+            }
+        } else {
+            None
+        };
+        for id in &self.worktree_sessions(wt) {
+            self.close_session(id);
+        }
+        match git::remove_worktree(project, wt, !merge) {
+            Err(e) => self.toast(format!("Removing the worktree failed: {e:#}")),
+            Ok(()) => match base {
+                Some(b) => self.toast(format!("Merged {} into {b}", wt.branch)),
+                None => self.toast(format!("Discarded {}", wt.branch)),
+            },
+        }
+        self.save();
+    }
+
     pub fn save(&mut self) {
         let mut recs: Vec<_> = self.sessions.iter().map(|s| s.record()).collect();
         recs.sort_by_key(|r| std::cmp::Reverse(r.created));
@@ -1099,6 +1180,16 @@ impl App {
                     Cmd::ResumeSession(id.clone()),
                 ));
             }
+            if let Some(wt) = git::linked_worktree(&s.project, &s.cwd) {
+                items.push(cmd(
+                    format!("Merge worktree: {}", wt.branch),
+                    Cmd::MergeWorktree(id.clone()),
+                ));
+                items.push(cmd(
+                    format!("Discard worktree: {}", wt.branch),
+                    Cmd::DiscardWorktree(id.clone()),
+                ));
+            }
         }
         for p in &self.state.projects {
             items.push(cmd(
@@ -1229,6 +1320,8 @@ impl App {
                     self.resume(&id);
                     self.focus_session(&id);
                 }
+                Cmd::MergeWorktree(id) => self.request_finish_worktree(&id, true),
+                Cmd::DiscardWorktree(id) => self.request_finish_worktree(&id, false),
                 Cmd::DefaultModel(m) => {
                     self.cfg.default_model = m.clone();
                     let _ = self.cfg.save();
@@ -1306,6 +1399,9 @@ impl App {
                             ConfirmAction::Quit => self.quit = true,
                             ConfirmAction::RemoveProject(p) => self.remove_project(&p),
                             ConfirmAction::CloseSession(id) => self.close_session(&id),
+                            ConfirmAction::FinishWorktree { project, wt, merge } => {
+                                self.finish_worktree(&project, &wt, merge)
+                            }
                         }
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q') => {
@@ -1550,6 +1646,11 @@ impl App {
             KeyCode::Char('e') => {
                 if let Some(RowKey::Session(id)) = self.selected.clone() {
                     self.open_rename(id);
+                }
+            }
+            KeyCode::Char('m') => {
+                if let Some(RowKey::Session(id)) = self.selected.clone() {
+                    self.request_finish_worktree(&id, true);
                 }
             }
             KeyCode::Char('d') => self.open_diff(),
