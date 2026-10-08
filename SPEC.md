@@ -33,7 +33,7 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 │ ● api-server       ││                                         │
 │ ○ blog             ││                                         │
 ╰────────────────────╯╰─────────────────────────────────────────╯
- ^p switch  ^l new  ^g diff  ^s settings
+ ^p switch  ^j new  ^g diff  ^s settings
 ```
 
 - Left: sessions grouped by project; needs-input sorts to the top of each group (and projects with
@@ -48,14 +48,14 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 | Key      | Action                                    |
 |----------|-------------------------------------------|
 | ctrl+p   | Switcher                                  |
-| ctrl+l   | New prompt                                |
+| ctrl+j   | New prompt                                |
 | ctrl+g   | Diff viewer for focused session's tree    |
 | ctrl+s   | Settings                                  |
 | alt+↑/↓  | Prev/next session (attention order)       |
 | alt+←/→  | Focus agent list / pane                   |
 
 All rebindable in settings. Note: these keys are then unavailable to claude itself
-(e.g. ctrl+p history-prev, ctrl+l redraw). ctrl+k stays with claude (kill-line).
+(e.g. ctrl+p history-prev, ctrl+j newline). ctrl+k stays with claude (kill-line).
 
 ## Switcher (ctrl+p)
 
@@ -65,7 +65,7 @@ One fuzzy list, sectioned:
 3. **Commands** — new worktree, remove project, change default model, open settings, …
 4. **Add folder** — fuzzy directory finder (rooted at configurable dirs, e.g. `~/Dev`)
 
-## New prompt (ctrl+l)
+## New prompt (ctrl+j)
 
 Centered modal:
 

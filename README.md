@@ -42,7 +42,7 @@ maximus ~/Dev/app  # or add a specific folder
 
 1. `ctrl+p`, type part of a folder name, `enter` to add it (folders come from `~/Dev` by default;
    change it in Settings → General → Folder search roots, or type a path like `~/work/api`).
-2. `ctrl+l`, type a task, `enter` — claude starts working in a pane on the right.
+2. `ctrl+j`, type a task, `enter` — claude starts working in a pane on the right.
 3. `alt+↓` jumps to whichever session needs you; `ctrl+g` shows what it changed.
 
 **First run:** sessions are the real `claude` CLI, so if you haven't used it in a terminal before,
@@ -86,7 +86,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | Key        | Action                                   |
 |------------|------------------------------------------|
 | `ctrl+p`   | Switcher: sessions, projects, commands, add folder |
-| `ctrl+l`   | New prompt                               |
+| `ctrl+j`   | New prompt                               |
 | `ctrl+g`   | Diff viewer for the current session's checkout |
 | `ctrl+s`   | Settings                                 |
 | `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen); in the left column, move between Agents and Graph |
