@@ -609,31 +609,15 @@ fn load_entry(root: &Path, change: git::Change) -> FileEntry {
         'D' => None,
         _ => std::fs::read(root.join(&change.path)).ok(),
     };
-    let mut note = None;
-    let is_binary = |b: &Option<Vec<u8>>| {
-        b.as_ref()
-            .is_some_and(|b| b[..b.len().min(8000)].contains(&0))
-    };
-    let too_big = |b: &Option<Vec<u8>>| b.as_ref().is_some_and(|b| b.len() > MAX_BYTES);
-    if is_binary(&old_bytes) || is_binary(&new_bytes) {
-        note = Some("Binary file");
-    } else if too_big(&old_bytes) || too_big(&new_bytes) {
-        note = Some("File too large to diff");
-    } else if change.status != 'D' && new_bytes.is_none() && root.join(&change.path).is_dir() {
+    let mut note = unreadable(&old_bytes, &new_bytes);
+    if note.is_none()
+        && change.status != 'D'
+        && new_bytes.is_none()
+        && root.join(&change.path).is_dir()
+    {
         note = Some("Directory (submodule?)");
     }
-    let (old, new) = if note.is_some() {
-        (String::new(), String::new())
-    } else {
-        (
-            old_bytes
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .unwrap_or_default(),
-            new_bytes
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .unwrap_or_default(),
-        )
-    };
+    let (old, new) = texts(note, old_bytes, new_bytes);
     let (mut adds, mut dels) = (0, 0);
     if note.is_none() {
         let d = TextDiff::from_lines(&old, &new);
@@ -657,6 +641,110 @@ fn load_entry(root: &Path, change: git::Change) -> FileEntry {
         old,
         new,
         note,
+    }
+}
+
+/// Why two file versions can't be shown as a text diff, if they can't.
+fn unreadable(old: &Option<Vec<u8>>, new: &Option<Vec<u8>>) -> Option<&'static str> {
+    let is_binary = |b: &Option<Vec<u8>>| {
+        b.as_ref()
+            .is_some_and(|b| b[..b.len().min(8000)].contains(&0))
+    };
+    let too_big = |b: &Option<Vec<u8>>| b.as_ref().is_some_and(|b| b.len() > MAX_BYTES);
+    if is_binary(old) || is_binary(new) {
+        Some("Binary file")
+    } else if too_big(old) || too_big(new) {
+        Some("File too large to diff")
+    } else {
+        None
+    }
+}
+
+fn texts(
+    note: Option<&'static str>,
+    old: Option<Vec<u8>>,
+    new: Option<Vec<u8>>,
+) -> (String, String) {
+    if note.is_some() {
+        return (String::new(), String::new());
+    }
+    let text = |b: Option<Vec<u8>>| {
+        b.map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default()
+    };
+    (text(old), text(new))
+}
+
+/// A single file's diff between two versions, drawn in a panel (used by the commit graph).
+pub struct FilePreview {
+    pub title: String,
+    note: Option<&'static str>,
+    diff: Option<FileDiff>,
+    max_line: usize,
+    pub split: bool,
+    scroll: usize,
+    hscroll: usize,
+}
+
+impl FilePreview {
+    pub fn new(
+        title: String,
+        path: &str,
+        old: Option<Vec<u8>>,
+        new: Option<Vec<u8>>,
+        theme: &Theme,
+        split: bool,
+    ) -> Self {
+        let note = unreadable(&old, &new);
+        let (old, new) = texts(note, old, new);
+        let diff = note.is_none().then(|| {
+            let syn = syn_themes().get(theme.syntax).clone();
+            build_diff(&old, &new, path, &syn)
+        });
+        Self {
+            title,
+            note,
+            diff,
+            max_line: old.lines().count().max(new.lines().count()),
+            split,
+            scroll: 0,
+            hscroll: 0,
+        }
+    }
+
+    pub fn scroll_by(&mut self, d: i32) {
+        self.scroll = (self.scroll as i64 + d as i64).max(0) as usize;
+    }
+
+    pub fn pan_by(&mut self, d: i32) {
+        self.hscroll = (self.hscroll as i64 + d as i64).max(0) as usize;
+    }
+
+    pub fn draw(&mut self, f: &mut Frame, area: Rect, focused: bool, t: &Theme) {
+        let block = ui::panel(&format!(" {} ", self.title), focused, t);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let Some(d) = &self.diff else {
+            let note = self.note.unwrap_or("");
+            f.render_widget(
+                Paragraph::new(Line::styled(note, Style::default().fg(t.muted))),
+                inner,
+            );
+            return;
+        };
+        let rows = if self.split { &d.split } else { &d.unified };
+        self.scroll = self.scroll.min(rows.len().saturating_sub(1));
+        draw_rows(
+            f,
+            inner,
+            rows,
+            d,
+            self.scroll,
+            self.hscroll,
+            self.split,
+            self.max_line,
+            t,
+        );
     }
 }
 
