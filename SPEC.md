@@ -131,7 +131,7 @@ Via switcher command. If sessions are live: `maximus has 2 running sessions. Sto
 ## Look
 
 Rounded borders, muted palette, accent on the focused pane. Built-in truecolor themes
-(e.g. Catppuccin Mocha, Tokyo Night, Gruvbox), selectable in settings.
+(e.g. Catppuccin Mocha, Tokyo Night, Gruvbox, Beardy Blueberry), selectable in settings.
 
 ## Stack
 
