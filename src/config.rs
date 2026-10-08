@@ -10,16 +10,19 @@ pub fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// A directory from the environment, made absolute: paths under it are handed to processes
+/// running in other directories (e.g. claude's `--settings`).
+fn env_dir(var: &str) -> Option<PathBuf> {
+    let p = PathBuf::from(std::env::var_os(var)?);
+    Some(std::path::absolute(&p).unwrap_or(p))
+}
+
 pub fn config_dir() -> PathBuf {
-    std::env::var_os("MAXIMUS_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".config/maximus"))
+    env_dir("MAXIMUS_CONFIG_DIR").unwrap_or_else(|| home().join(".config/maximus"))
 }
 
 pub fn state_dir() -> PathBuf {
-    std::env::var_os("MAXIMUS_STATE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".local/state/maximus"))
+    env_dir("MAXIMUS_STATE_DIR").unwrap_or_else(|| home().join(".local/state/maximus"))
 }
 
 /// Expand a leading `~` to the home directory.
