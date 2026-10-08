@@ -104,7 +104,7 @@ Centered, nearly-full-screen modal over the main screen.
 
 ## Settings (ctrl+s)
 
-Modal with tabs: **General** (default model, effort, project roots for Add folder) ·
+Modal with tabs: **General** (default model, effort, permission mode, project roots for Add folder) ·
 **Sessions** (timeouts) · **Keys** (rebind) · **Notifications** · **Theme**.
 Stored at `~/.config/maximus/config.toml`; project list + layout in `~/.local/state/maximus/`.
 
