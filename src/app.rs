@@ -757,6 +757,7 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        self.keep_diff_layout();
         self.save();
         for s in &mut self.sessions {
             s.kill();
@@ -1183,12 +1184,20 @@ impl App {
         self.modal = Some(Modal::Rename(Rename { id, input }));
     }
 
-    fn close_modal(&mut self) {
-        if let Some(Modal::Diff(d)) = &self.modal {
+    /// Saves the open diff viewer's tree width and split mode when they changed, so they
+    /// survive even if maximus is killed with the viewer open.
+    fn keep_diff_layout(&mut self) {
+        if let Some(Modal::Diff(d)) = &self.modal
+            && (self.state.diff_tree_width, self.state.diff_split) != (d.tree_width, d.split)
+        {
             self.state.diff_tree_width = d.tree_width;
             self.state.diff_split = d.split;
             let _ = self.state.save();
         }
+    }
+
+    fn close_modal(&mut self) {
+        self.keep_diff_layout();
         self.modal = None;
         self.mark_seen();
     }
@@ -1278,6 +1287,8 @@ impl App {
                         self.close_modal();
                     } else if let DiffAction::Close = d.handle_key(k) {
                         self.close_modal();
+                    } else {
+                        self.keep_diff_layout();
                     }
                 }
                 Modal::Settings(s) => match s.handle_key(k, &mut self.cfg) {
@@ -1558,7 +1569,13 @@ impl App {
     fn handle_mouse(&mut self, m: MouseEvent) {
         if let Some(modal) = &mut self.modal {
             match modal {
-                Modal::Diff(d) => d.handle_mouse(m),
+                Modal::Diff(d) => {
+                    d.handle_mouse(m);
+                    // Save once a separator drag ends, not on every step.
+                    if matches!(m.kind, MouseEventKind::Up(_)) {
+                        self.keep_diff_layout();
+                    }
+                }
                 Modal::Switcher(s) => {
                     if let Some(a) = s.handle_mouse(m) {
                         self.run_action(a);
