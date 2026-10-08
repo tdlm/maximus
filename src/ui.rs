@@ -701,6 +701,11 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     if app.focus == Focus::List {
         add("⏎".into(), "open");
         add("x".into(), "close");
+        if let Some(RowKey::Session(id)) = &app.selected
+            && app.session(id).is_some_and(|s| s.cwd != s.project)
+        {
+            add("m".into(), "merge");
+        }
         if app.state.graph_open {
             add(k.next_session.short(), "graph");
         }
