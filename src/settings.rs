@@ -16,12 +16,24 @@ use crate::{
     ui,
 };
 
+/// Values for claude --permission-mode; empty lets claude decide.
+const MODES: &[&str] = &[
+    "",
+    "manual",
+    "acceptEdits",
+    "plan",
+    "auto",
+    "dontAsk",
+    "bypassPermissions",
+];
+
 const TABS: &[&str] = &["General", "Sessions", "Keys", "Notifications", "Theme"];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Field {
     DefaultModel,
     DefaultEffort,
+    DefaultMode,
     Models,
     ProjectRoots,
     WorktreeDir,
@@ -68,6 +80,7 @@ fn fields(tab: usize) -> Vec<(Field, &'static str)> {
         0 => vec![
             (Field::DefaultModel, "Default model"),
             (Field::DefaultEffort, "Default effort"),
+            (Field::DefaultMode, "Default permission mode"),
             (Field::Models, "Model list"),
             (Field::ProjectRoots, "Folder search roots"),
             (Field::WorktreeDir, "Worktree directory"),
@@ -113,6 +126,13 @@ fn value(cfg: &Config, f: Field) -> String {
                 "default".into()
             } else {
                 cfg.default_effort.clone()
+            }
+        }
+        Field::DefaultMode => {
+            if cfg.default_mode.is_empty() {
+                "default".into()
+            } else {
+                cfg.default_mode.clone()
             }
         }
         Field::Models => cfg.models.join(", "),
@@ -201,6 +221,13 @@ impl SettingsModal {
                     .unwrap_or(0) as i32;
                 cfg.default_effort =
                     EFFORTS[(i + d).rem_euclid(EFFORTS.len() as i32) as usize].into();
+            }
+            Field::DefaultMode => {
+                let i = MODES
+                    .iter()
+                    .position(|m| *m == cfg.default_mode)
+                    .unwrap_or(0) as i32;
+                cfg.default_mode = MODES[(i + d).rem_euclid(MODES.len() as i32) as usize].into();
             }
             Field::IdleKill => step(&mut cfg.timeouts.idle_kill),
             Field::Archive => step(&mut cfg.timeouts.archive_finished),
@@ -297,6 +324,7 @@ impl SettingsModal {
                     match f {
                         Field::Key(_) => self.capturing = true,
                         Field::DefaultEffort
+                        | Field::DefaultMode
                         | Field::NotifMac
                         | Field::NotifBell
                         | Field::NotifBadge
@@ -418,6 +446,7 @@ impl SettingsModal {
                 field,
                 Field::DefaultModel
                     | Field::DefaultEffort
+                    | Field::DefaultMode
                     | Field::IdleKill
                     | Field::Archive
                     | Field::Nag
