@@ -89,6 +89,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+j`   | New prompt                               |
 | `ctrl+g`   | Diff viewer for the current session's checkout |
 | `ctrl+k`   | Commit the current session's changes     |
+| `ctrl+t`   | Terminal in the current session's checkout (again to hide) |
 | `ctrl+s`   | Settings                                 |
 | `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen); in the left column, move between Agents and Graph |
 | `alt+←/→`  | Focus agent list / pane                  |
@@ -124,6 +125,12 @@ folder) and `a` toggles all. A file you staged earlier but leave unchecked stays
 the commit. After a commit the viewer stays open on what's left, so you can split the changes into
 several commits; it closes when nothing is left. If a hook rejects the commit, its output shows on
 the right and your message is kept.
+
+Terminal (`ctrl+t`): a shell in the current session's checkout (or the selected project), over
+the main screen. Everything you type goes to the shell except `ctrl+t`, which hides the terminal and
+leaves the shell running, so a dev server or watcher keeps going; `ctrl+t` brings back the same
+shell. `exit` or `ctrl+d` ends the shell and closes the terminal. Each checkout gets its own shell.
+`shift+PgUp/PgDn` or the mouse wheel scrolls back. Quitting asks first while any shell is running.
 
 Mouse: click to select/focus, drag the pane separators, scroll lists, panes and diffs.
 
