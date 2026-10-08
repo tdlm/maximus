@@ -23,6 +23,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::{
     config::tilde,
     git,
+    textinput::TextInput,
     theme::{Syntax, Theme},
     ui,
 };
@@ -96,6 +97,17 @@ struct TreeRow {
 pub enum DiffAction {
     None,
     Close,
+    /// Commit these paths (renames include the old path) with this message.
+    Commit(Vec<String>, String),
+}
+
+/// Commit mode: which files go in, and the message.
+struct CommitForm {
+    /// Paths left out of the commit; everything else is included.
+    excluded: HashSet<String>,
+    message: TextInput,
+    focus_message: bool,
+    busy: bool,
 }
 
 pub struct DiffView {
@@ -117,6 +129,10 @@ pub struct DiffView {
     dragging: bool,
     error: Option<String>,
     syntax_theme: Syntax,
+    commit: Option<CommitForm>,
+    /// Why the last commit failed (e.g. hook output), shown in the file pane until a key.
+    commit_error: Option<String>,
+    message_rect: Rect,
 }
 
 impl DiffView {
@@ -141,9 +157,151 @@ impl DiffView {
             dragging: false,
             error: None,
             syntax_theme: theme.syntax,
+            commit: None,
+            commit_error: None,
+            message_rect: Rect::default(),
         };
         v.reload();
         v
+    }
+
+    pub fn has_changes(&self) -> bool {
+        !self.files.is_empty()
+    }
+
+    pub fn committing(&self) -> bool {
+        self.commit.is_some()
+    }
+
+    pub fn busy(&self) -> bool {
+        self.commit.as_ref().is_some_and(|c| c.busy)
+    }
+
+    /// Switches into commit mode with every file included and the message focused.
+    pub fn start_commit(&mut self) {
+        self.focus_file = false;
+        self.commit = Some(CommitForm {
+            excluded: HashSet::new(),
+            message: TextInput::new(true),
+            focus_message: true,
+            busy: false,
+        });
+    }
+
+    pub fn paste(&mut self, s: &str) {
+        if let Some(c) = &mut self.commit
+            && c.focus_message
+            && !c.busy
+        {
+            c.message.insert_str(s);
+        }
+    }
+
+    /// After a successful commit: reload what's left and start over on a fresh message.
+    pub fn committed(&mut self) {
+        self.reload();
+        self.start_commit();
+    }
+
+    pub fn commit_failed(&mut self, err: String) {
+        if let Some(c) = &mut self.commit {
+            c.busy = false;
+        }
+        self.commit_error = Some(err);
+    }
+
+    fn included(&self, f: usize) -> bool {
+        self.commit
+            .as_ref()
+            .is_none_or(|c| !c.excluded.contains(&self.files[f].change.path))
+    }
+
+    /// Files under the tree row `idx`: the file itself, or everything in a directory.
+    fn files_under(&self, idx: usize) -> Vec<usize> {
+        let r = &self.rows[idx];
+        match r.file {
+            Some(f) => vec![f],
+            None => (0..self.files.len())
+                .filter(|&f| self.files[f].change.path.starts_with(&r.key))
+                .collect(),
+        }
+    }
+
+    /// Includes the files if any of them is left out, otherwise leaves them all out.
+    fn toggle_files(&mut self, files: Vec<usize>) {
+        let include = files.iter().any(|&f| !self.included(f));
+        let paths: Vec<String> = files
+            .iter()
+            .map(|&f| self.files[f].change.path.clone())
+            .collect();
+        let Some(c) = &mut self.commit else { return };
+        for p in paths {
+            if include {
+                c.excluded.remove(&p);
+            } else {
+                c.excluded.insert(p);
+            }
+        }
+    }
+
+    fn submit_commit(&mut self) -> DiffAction {
+        let mut paths = Vec::new();
+        for (i, f) in self.files.iter().enumerate() {
+            if self.included(i) {
+                paths.push(f.change.path.clone());
+                paths.extend(f.change.old_path.clone());
+            }
+        }
+        let Some(c) = &mut self.commit else {
+            return DiffAction::None;
+        };
+        let message = c.message.text.trim().to_string();
+        if paths.is_empty() {
+            self.commit_error = Some("No files selected".into());
+        } else if message.is_empty() {
+            self.commit_error = Some("Write a commit message first".into());
+        } else {
+            c.busy = true;
+            return DiffAction::Commit(paths, message);
+        }
+        DiffAction::None
+    }
+
+    /// Commit-mode keys; None lets the viewer's usual keys handle it.
+    fn commit_key(&mut self, k: KeyEvent) -> Option<DiffAction> {
+        let c = self.commit.as_mut()?;
+        if c.busy {
+            return Some(DiffAction::None);
+        }
+        let alt_shift = k
+            .modifiers
+            .intersects(KeyModifiers::ALT | KeyModifiers::SHIFT);
+        if c.focus_message {
+            match k.code {
+                KeyCode::Enter if !alt_shift => return Some(self.submit_commit()),
+                KeyCode::Esc | KeyCode::Tab => c.focus_message = false,
+                // Scroll the diff without leaving the message.
+                KeyCode::PageUp | KeyCode::PageDown => return None,
+                _ => {
+                    c.message.handle_key(&k);
+                }
+            }
+            return Some(DiffAction::None);
+        }
+        if self.focus_file {
+            return None;
+        }
+        match k.code {
+            KeyCode::Tab | KeyCode::Char('c') => c.focus_message = true,
+            KeyCode::Char(' ') => {
+                if !self.rows.is_empty() {
+                    self.toggle_files(self.files_under(self.sel));
+                }
+            }
+            KeyCode::Char('a') => self.toggle_files((0..self.files.len()).collect()),
+            _ => return None,
+        }
+        Some(DiffAction::None)
     }
 
     pub fn reload(&mut self) {
@@ -312,6 +470,10 @@ impl DiffView {
     }
 
     pub fn handle_key(&mut self, k: KeyEvent) -> DiffAction {
+        self.commit_error = None;
+        if let Some(a) = self.commit_key(k) {
+            return a;
+        }
         let page = self.file_rect.height.saturating_sub(2).max(1) as usize;
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // Keys shared by both panes.
@@ -429,9 +591,18 @@ impl DiffView {
                     self.dragging = true;
                 } else if inside(self.tree_rect) {
                     self.focus_file = false;
+                    if let Some(c) = &mut self.commit {
+                        c.focus_message = false;
+                    }
                     let row = y.saturating_sub(self.tree_rect.y + 1) as usize + self.tree_offset;
                     if y > self.tree_rect.y && row < self.rows.len() {
-                        if self.rows[row].file.is_none() {
+                        // The checkbox sits after the row's indent.
+                        let col = x.saturating_sub(self.tree_rect.x + 1) as usize;
+                        let indent = 2 * self.rows[row].depth;
+                        if self.commit.is_some() && (indent..indent + 4).contains(&col) {
+                            self.select(row);
+                            self.toggle_files(self.files_under(row));
+                        } else if self.rows[row].file.is_none() {
                             self.toggle_dir(row);
                         } else {
                             self.select(row);
@@ -439,6 +610,11 @@ impl DiffView {
                     }
                 } else if inside(self.file_rect) {
                     self.focus_file = true;
+                } else if inside(self.message_rect)
+                    && let Some(c) = &mut self.commit
+                {
+                    self.focus_file = false;
+                    c.focus_message = true;
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
@@ -470,10 +646,26 @@ impl DiffView {
         let outer = ui::centered(area, 96, 94);
         f.render_widget(Clear, outer);
         f.render_widget(ui::fill(t.bg), outer);
-        let body = Rect {
+        let mut body = Rect {
             height: outer.height.saturating_sub(1),
             ..outer
         };
+        if let Some(c) = &self.commit {
+            let rows = c
+                .message
+                .layout(body.width.saturating_sub(4) as usize)
+                .0
+                .len();
+            let h = (rows.clamp(2, 8) as u16 + 2).min(body.height / 2);
+            body.height -= h;
+            self.message_rect = Rect {
+                y: body.y + body.height,
+                height: h,
+                ..body
+            };
+        } else {
+            self.message_rect = Rect::default();
+        }
         let tw = self.tree_width.min(body.width.saturating_sub(30)).max(16);
         self.tree_rect = Rect { width: tw, ..body };
         self.file_rect = Rect {
@@ -483,16 +675,23 @@ impl DiffView {
         };
 
         // Tree
+        let picked = (0..self.files.len()).filter(|&f| self.included(f)).count();
         let title = format!(
-            " Changes ({}) · {}{} ",
-            self.files.len(),
+            " {} · {}{} ",
+            if self.commit.is_some() {
+                format!("Commit {picked} of {}", self.files.len())
+            } else {
+                format!("Changes ({})", self.files.len())
+            },
             tilde(&self.root),
             self.branch
                 .as_deref()
                 .map(|b| format!(" · {b}"))
                 .unwrap_or_default()
         );
-        let block = ui::panel(&title, !self.focus_file, t);
+        let tree_focused =
+            !self.focus_file && self.commit.as_ref().is_none_or(|c| !c.focus_message);
+        let block = ui::panel(&title, tree_focused, t);
         let inner = block.inner(self.tree_rect);
         f.render_widget(block, self.tree_rect);
         let h = inner.height as usize;
@@ -518,6 +717,18 @@ impl DiffView {
                 Style::default().fg(t.fg)
             };
             let mut spans = vec![Span::styled("  ".repeat(r.depth), base)];
+            let files = self.files_under(i);
+            let n = files.iter().filter(|&&f| self.included(f)).count();
+            if self.commit.is_some() {
+                let (mark, color) = match n {
+                    0 => ("[ ] ", t.muted),
+                    n if n == files.len() => ("[x] ", t.green),
+                    _ => ("[-] ", t.yellow),
+                };
+                spans.push(Span::styled(mark, base.fg(color)));
+            }
+            // Left-out files are dimmed.
+            let base = if n == 0 { base.fg(t.muted) } else { base };
             if let Some(fi) = r.file {
                 let fe = &self.files[fi];
                 let (letter, color) = match fe.change.status {
@@ -561,7 +772,14 @@ impl DiffView {
         let block = ui::panel(&title, self.focus_file, t);
         let inner = block.inner(self.file_rect);
         f.render_widget(block, self.file_rect);
-        if let Some(i) = sel_file {
+        if let Some(e) = &self.commit_error {
+            f.render_widget(
+                Paragraph::new(e.as_str())
+                    .style(Style::default().fg(t.red))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
+                inner,
+            );
+        } else if let Some(i) = sel_file {
             if let Some(note) = self.files[i].note {
                 f.render_widget(
                     Paragraph::new(Line::styled(note, Style::default().fg(t.muted))),
@@ -591,13 +809,49 @@ impl DiffView {
             }
         }
 
+        // Commit message
+        if let Some(c) = &self.commit {
+            let block = ui::panel(" Commit message ", c.focus_message, t);
+            let inner = block.inner(self.message_rect);
+            f.render_widget(block, self.message_rect);
+            let inner = Rect {
+                x: inner.x + 1,
+                width: inner.width.saturating_sub(2),
+                ..inner
+            };
+            let (lines, (crow, ccol)) = c.message.layout(inner.width as usize);
+            let scroll = (crow + 1).saturating_sub(inner.height as usize);
+            let lines: Vec<Line> = if c.message.text.is_empty() && !c.focus_message {
+                vec![Line::styled(
+                    "tab to write the message",
+                    Style::default().fg(t.muted),
+                )]
+            } else {
+                lines.into_iter().skip(scroll).map(Line::raw).collect()
+            };
+            f.render_widget(
+                Paragraph::new(lines).style(Style::default().fg(t.fg)),
+                inner,
+            );
+            if c.focus_message && !c.busy {
+                f.set_cursor_position((inner.x + ccol as u16, inner.y + (crow - scroll) as u16));
+            }
+        }
+
         // Hints
         let hint_area = Rect {
             y: outer.y + outer.height.saturating_sub(1),
             height: 1,
             ..outer
         };
-        let hints = if self.focus_file {
+        let commit = self.commit.as_ref();
+        let hints = if commit.is_some_and(|c| c.busy) {
+            "Committing…"
+        } else if commit.is_some_and(|c| c.focus_message) {
+            "enter commit · alt+enter newline · PgUp/PgDn scroll diff · tab/esc files"
+        } else if commit.is_some() && !self.focus_file {
+            "space include/exclude · a all · j/k file · enter open · tab message · esc close"
+        } else if self.focus_file {
             "j/k scroll · J/K hunk · ]/[ file · ←/→ pan · s split/unified · esc tree · q close"
         } else {
             "j/k file · J/K hunk · enter open · h/l fold · s split/unified · r refresh · esc close"

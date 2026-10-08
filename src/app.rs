@@ -32,6 +32,8 @@ pub enum AppEvent {
     Hook(HookMsg),
     Folders(Vec<PathBuf>),
     Graph(PathBuf, Vec<GraphRow>),
+    /// A background commit in this checkout finished: the short hash, or git's error.
+    Committed(PathBuf, Result<String, String>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +91,7 @@ pub struct GlobalKeys {
     pub focus_list: KeySet,
     pub focus_pane: KeySet,
     pub graph: KeySet,
+    pub commit: KeySet,
 }
 
 impl GlobalKeys {
@@ -104,6 +107,7 @@ impl GlobalKeys {
             focus_list: KeySet::parse(&k.focus_list),
             focus_pane: KeySet::parse(&k.focus_pane),
             graph: KeySet::parse(&k.graph),
+            commit: KeySet::parse(&k.commit),
         }
     }
 }
@@ -871,6 +875,7 @@ impl App {
             }
             AppEvent::Hook(m) => self.handle_hook(m),
             AppEvent::Folders(f) => self.folders = f,
+            AppEvent::Committed(root, res) => self.commit_finished(root, res),
             AppEvent::Graph(dir, rows) => {
                 let g = &mut self.graph;
                 if g.dir.as_ref() == Some(&dir) {
@@ -1075,6 +1080,7 @@ impl App {
             Some(Modal::Prompt(p)) => p.paste(s),
             Some(Modal::Settings(st)) => st.paste(s),
             Some(Modal::Rename(r)) => r.input.insert_str(s),
+            Some(Modal::Diff(d)) => d.paste(s),
             Some(_) => {}
             None => {
                 if self.focus == Focus::Pane
@@ -1157,6 +1163,10 @@ impl App {
         items.push(Item {
             detail: k.diff.short(),
             ..cmd("View changes (diff)".into(), Cmd::Diff)
+        });
+        items.push(Item {
+            detail: k.commit.short(),
+            ..cmd("Commit changes".into(), Cmd::Commit)
         });
         items.push(Item {
             detail: k.settings.short(),
@@ -1247,7 +1257,8 @@ impl App {
         }));
     }
 
-    fn open_diff(&mut self) {
+    /// Opens the diff viewer on the current session's checkout, in commit mode if `commit`.
+    fn open_diff(&mut self, commit: bool) {
         let dir = self
             .current
             .as_ref()
@@ -1262,12 +1273,49 @@ impl App {
             self.toast(format!("{} is not a git repository", tilde(&dir)));
             return;
         }
-        self.modal = Some(Modal::Diff(Box::new(DiffView::open(
+        let mut d = DiffView::open(
             dir,
             self.theme,
             self.state.diff_tree_width,
             self.state.diff_split,
-        ))));
+        );
+        if commit {
+            if !d.has_changes() {
+                return self.toast("Nothing to commit");
+            }
+            d.start_commit();
+        }
+        self.modal = Some(Modal::Diff(Box::new(d)));
+    }
+
+    /// Runs the commit in the background so slow hooks don't freeze the UI.
+    fn start_commit(&mut self, root: PathBuf, paths: Vec<String>, message: String) {
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let res = git::commit_paths(&root, &paths, &message).map_err(|e| format!("{e:#}"));
+            let _ = tx.send(AppEvent::Committed(root, res));
+        });
+    }
+
+    fn commit_finished(&mut self, root: PathBuf, res: Result<String, String>) {
+        let open = match &mut self.modal {
+            Some(Modal::Diff(d)) if d.root == root && d.busy() => Some(d),
+            _ => None,
+        };
+        match (res, open) {
+            (Ok(hash), d) => {
+                if let Some(d) = d {
+                    d.committed();
+                    if !d.has_changes() {
+                        self.close_modal();
+                    }
+                }
+                self.toast(format!("Committed {hash}"));
+                self.graph.fetched = None;
+            }
+            (Err(e), Some(d)) => d.commit_failed(e),
+            (Err(e), None) => self.toast(format!("Commit failed: {e}")),
+        }
     }
 
     fn open_rename(&mut self, id: String) {
@@ -1311,7 +1359,8 @@ impl App {
             Action::Cmd(c) => match c {
                 Cmd::NewPrompt => self.open_prompt(false),
                 Cmd::NewWorktree => self.open_prompt(true),
-                Cmd::Diff => self.open_diff(),
+                Cmd::Diff => self.open_diff(false),
+                Cmd::Commit => self.open_diff(true),
                 Cmd::Settings => self.modal = Some(Modal::Settings(SettingsModal::new())),
                 Cmd::RemoveProject(p) => self.request_remove_project(p),
                 Cmd::CloseSession(id) => self.request_close_session(id),
@@ -1377,12 +1426,21 @@ impl App {
                     PromptAction::None => {}
                 },
                 Modal::Diff(d) => {
-                    if self.keys.diff.matches(&k) {
-                        self.close_modal();
-                    } else if let DiffAction::Close = d.handle_key(k) {
+                    if d.busy() {
+                        // Wait for the commit to finish.
+                    } else if self.keys.commit.matches(&k) && !d.committing() {
+                        d.start_commit();
+                    } else if self.keys.diff.matches(&k) || self.keys.commit.matches(&k) {
                         self.close_modal();
                     } else {
-                        self.keep_diff_layout();
+                        match d.handle_key(k) {
+                            DiffAction::Close => self.close_modal(),
+                            DiffAction::Commit(paths, message) => {
+                                let root = d.root.clone();
+                                self.start_commit(root, paths, message);
+                            }
+                            DiffAction::None => self.keep_diff_layout(),
+                        }
                     }
                 }
                 Modal::Settings(s) => match s.handle_key(k, &mut self.cfg) {
@@ -1440,7 +1498,10 @@ impl App {
             return self.open_prompt(false);
         }
         if g.diff.matches(&k) {
-            return self.open_diff();
+            return self.open_diff(false);
+        }
+        if g.commit.matches(&k) {
+            return self.open_diff(true);
         }
         if g.settings.matches(&k) {
             self.modal = Some(Modal::Settings(SettingsModal::new()));
@@ -1550,7 +1611,7 @@ impl App {
                 }
             }
             KeyCode::Char('t') => self.toggle_graph(),
-            KeyCode::Char('d') => self.open_diff(),
+            KeyCode::Char('d') => self.open_diff(false),
             KeyCode::Char('n') => self.open_prompt(false),
             KeyCode::Char('/') => self.open_switcher(),
             KeyCode::Char(',') => self.modal = Some(Modal::Settings(SettingsModal::new())),
@@ -1653,7 +1714,7 @@ impl App {
                     self.request_finish_worktree(&id, true);
                 }
             }
-            KeyCode::Char('d') => self.open_diff(),
+            KeyCode::Char('d') => self.open_diff(false),
             KeyCode::Char('t') => self.toggle_graph(),
             KeyCode::Char('/') => self.open_switcher(),
             KeyCode::Char(',') => self.modal = Some(Modal::Settings(SettingsModal::new())),

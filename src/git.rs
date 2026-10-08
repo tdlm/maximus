@@ -120,6 +120,31 @@ pub fn remove_worktree(project: &Path, wt: &Worktree, force: bool) -> Result<()>
     Ok(())
 }
 
+/// Commits the working-tree state of `paths` (deletions and new files included), leaving
+/// every other change out of the commit, even one already staged. Returns the new commit's
+/// short hash.
+pub fn commit_paths(dir: &Path, paths: &[String], message: &str) -> Result<String> {
+    if paths.is_empty() {
+        bail!("no files to commit");
+    }
+    let mut args = vec!["update-index", "--add", "--remove", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    git(dir, &args)?;
+    // --only commits just these paths from a temporary index; other staged changes stay staged.
+    let mut args = vec![
+        "--literal-pathspecs",
+        "commit",
+        "-q",
+        "--only",
+        "-m",
+        message,
+        "--",
+    ];
+    args.extend(paths.iter().map(String::as_str));
+    git(dir, &args)?;
+    git_str(dir, &["rev-parse", "--short", "HEAD"])
+}
+
 pub fn slug(s: &str, max_words: usize) -> String {
     let words: Vec<String> = s
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -324,6 +349,41 @@ mod tests {
         remove_worktree(&main, &wt, false).unwrap();
         assert!(!path.exists());
         assert!(git(&main, &["rev-parse", "--verify", "feat"]).is_err());
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
+
+    #[test]
+    fn commits_only_the_chosen_paths() {
+        let main = repo("commit");
+        for f in ["edit", "gone", "staged-gone", "old", "kept"] {
+            commit_file(&main, f);
+        }
+        std::fs::write(main.join("edit"), "changed").unwrap();
+        std::fs::remove_file(main.join("gone")).unwrap();
+        git(&main, &["rm", "-q", "staged-gone"]).unwrap();
+        git(&main, &["mv", "old", "new"]).unwrap();
+        std::fs::write(main.join("fresh *"), "").unwrap();
+        // Staged but left out of the commit.
+        std::fs::write(main.join("kept"), "changed").unwrap();
+        git(&main, &["add", "kept"]).unwrap();
+
+        let paths: Vec<String> = ["edit", "gone", "staged-gone", "new", "old", "fresh *"]
+            .map(String::from)
+            .into();
+        let hash = commit_paths(&main, &paths, "pick some").unwrap();
+        assert!(!hash.is_empty());
+        let left: Vec<(String, char)> = changes(&main)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.path, c.status))
+            .collect();
+        assert_eq!(left, [("kept".to_string(), 'M')]);
+        // Still staged.
+        assert_eq!(
+            git_str(&main, &["diff", "--cached", "--name-only"]).unwrap(),
+            "kept"
+        );
+        assert!(commit_paths(&main, &[], "nothing").is_err());
         let _ = std::fs::remove_dir_all(main.parent().unwrap());
     }
 

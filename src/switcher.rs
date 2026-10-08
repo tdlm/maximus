@@ -22,6 +22,7 @@ pub enum Cmd {
     CloseSession(String),
     RenameSession(String),
     ResumeSession(String),
+    Commit,
     MergeWorktree(String),
     DiscardWorktree(String),
     DefaultModel(String),
