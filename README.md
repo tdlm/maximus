@@ -93,7 +93,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+y`   | Memory used by claude sessions, shells and maximus |
 | `ctrl+n`   | Overview of every agent as tiles         |
 | `ctrl+s`   | Settings                                 |
-| `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen); in the left column, move between Agents and Graph |
+| `alt+↓/↑`  | Next/previous session in agent-list order, wrapping around; in the left column, move between Agents and Graph |
 | `alt+←/→`  | Focus agent list / pane                  |
 | `ctrl+q`   | Show/hide the commit graph               |
 

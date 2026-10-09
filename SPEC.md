@@ -57,7 +57,7 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 | ctrl+y   | Memory usage                              |
 | ctrl+n   | Agent overview                            |
 | ctrl+s   | Settings                                  |
-| alt+↑/↓  | Prev/next session (attention order)       |
+| alt+↑/↓  | Prev/next session in the agent list      |
 | alt+←/→  | Focus agent list / pane                   |
 
 All rebindable in settings. Note: these keys are then unavailable to claude itself

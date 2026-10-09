@@ -609,21 +609,26 @@ impl App {
         self.select(rows[n].clone());
     }
 
-    fn cycle_attention(&mut self, d: i32) {
-        let order = self.attention_order();
-        if order.is_empty() {
-            return;
-        }
-        let i = self
-            .current
+    /// Steps to the next/previous session row in the agent list, wrapping around and
+    /// skipping project rows.
+    fn cycle_session(&mut self, d: i32) {
+        let rows = self.rows();
+        let n = rows.len() as i32;
+        let start = self
+            .selected
             .as_ref()
-            .and_then(|c| order.iter().position(|o| o == c));
-        let n = match i {
-            Some(i) => (i as i32 + d).rem_euclid(order.len() as i32) as usize,
-            None => 0,
-        };
-        let id = order[n].clone();
-        self.select(RowKey::Session(id));
+            .and_then(|s| rows.iter().position(|r| r == s))
+            .map(|i| i as i32);
+        // With nothing selected, alt+down lands on the first session and alt+up on the last.
+        let start = start.unwrap_or(if d > 0 { -1 } else { n });
+        for step in 1..=n {
+            let i = (start + d * step).rem_euclid(n) as usize;
+            if let RowKey::Session(id) = &rows[i] {
+                let id = id.clone();
+                self.select(RowKey::Session(id));
+                return;
+            }
+        }
     }
 
     fn mark_seen(&mut self) {
@@ -1824,10 +1829,10 @@ impl App {
             return;
         }
         if g.next_session.matches(&k) {
-            return self.cycle_attention(1);
+            return self.cycle_session(1);
         }
         if g.prev_session.matches(&k) {
-            return self.cycle_attention(-1);
+            return self.cycle_session(-1);
         }
         if g.graph.matches(&k) {
             return self.toggle_graph();

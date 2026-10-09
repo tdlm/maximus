@@ -588,7 +588,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
         ("w".into(), "New prompt in a new worktree"),
         ("N".into(), "New project in a new folder"),
         (k.switcher.short(), "Switch sessions, projects, commands"),
-        (k.next_session.short(), "Jump to the session that needs you"),
+        (k.next_session.short(), "Next session in the agent list"),
         (
             format!("{} {}", k.focus_list.short(), k.focus_pane.short()),
             "Focus agent list / pane",
