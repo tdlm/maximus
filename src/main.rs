@@ -3,6 +3,7 @@ mod config;
 mod diff;
 mod git;
 mod hooks;
+mod intro;
 mod keys;
 mod memory;
 mod notify;
@@ -134,7 +135,8 @@ fn main() -> Result<()> {
         }
     });
 
-    let result = run(&mut terminal, &mut app, rx);
+    let result =
+        intro::play(&mut terminal, &mut app, &rx).and_then(|()| run(&mut terminal, &mut app, rx));
     app.shutdown();
     restore_terminal(kbd);
     let _ = std::fs::remove_file(&sock);
