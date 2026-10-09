@@ -46,6 +46,7 @@ enum Field {
     NotifBell,
     NotifBadge,
     Theme,
+    Intro,
 }
 
 const KEY_NAMES: &[&str] = &[
@@ -105,7 +106,7 @@ fn fields(tab: usize) -> Vec<(Field, &'static str)> {
             (Field::NotifBell, "Terminal bell"),
             (Field::NotifBadge, "iTerm2 badge"),
         ],
-        _ => vec![(Field::Theme, "Theme")],
+        _ => vec![(Field::Theme, "Theme"), (Field::Intro, "Startup animation")],
     }
 }
 
@@ -153,6 +154,7 @@ fn value(cfg: &Config, f: Field) -> String {
         Field::NotifBell => on(cfg.notifications.bell),
         Field::NotifBadge => on(cfg.notifications.badge),
         Field::Theme => theme::by_id(&cfg.theme).label.to_string(),
+        Field::Intro => on(cfg.intro),
     }
 }
 
@@ -241,6 +243,7 @@ impl SettingsModal {
             Field::NotifMac => cfg.notifications.macos ^= true,
             Field::NotifBell => cfg.notifications.bell ^= true,
             Field::NotifBadge => cfg.notifications.badge ^= true,
+            Field::Intro => cfg.intro ^= true,
             Field::Theme => {
                 let i = THEMES.iter().position(|t| t.id == cfg.theme).unwrap_or(0) as i32;
                 cfg.theme = THEMES[(i + d).rem_euclid(THEMES.len() as i32) as usize]
@@ -334,7 +337,8 @@ impl SettingsModal {
                         | Field::NotifMac
                         | Field::NotifBell
                         | Field::NotifBadge
-                        | Field::Theme => {
+                        | Field::Theme
+                        | Field::Intro => {
                             self.cycle(cfg, f, 1);
                             return SettingsAction::Changed;
                         }

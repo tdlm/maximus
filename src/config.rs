@@ -59,6 +59,8 @@ pub struct Config {
     pub worktree_dir: String,
     pub claude_command: String,
     pub theme: String,
+    /// Play the wordmark animation at startup.
+    pub intro: bool,
     pub timeouts: Timeouts,
     pub notifications: Notifications,
     pub keys: Keys,
@@ -80,6 +82,7 @@ impl Default for Config {
             worktree_dir: "~/.local/share/maximus/worktrees".into(),
             claude_command: "claude".into(),
             theme: crate::theme::DEFAULT_ID.into(),
+            intro: true,
             timeouts: Timeouts::default(),
             notifications: Notifications::default(),
             keys: Keys::default(),

@@ -135,8 +135,12 @@ fn main() -> Result<()> {
         }
     });
 
-    let result =
-        intro::play(&mut terminal, &mut app, &rx).and_then(|()| run(&mut terminal, &mut app, rx));
+    let intro = if app.cfg.intro {
+        intro::play(&mut terminal, &mut app, &rx)
+    } else {
+        Ok(())
+    };
+    let result = intro.and_then(|()| run(&mut terminal, &mut app, rx));
     app.shutdown();
     restore_terminal(kbd);
     let _ = std::fs::remove_file(&sock);

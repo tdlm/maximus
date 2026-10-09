@@ -142,7 +142,7 @@ seconds while open. RSS counts shared pages once per process, so totals run a li
 ## Settings (ctrl+s)
 
 Modal with tabs: **General** (default model, effort, permission mode, project roots for Add folder) ·
-**Sessions** (timeouts) · **Keys** (rebind) · **Notifications** · **Theme**.
+**Sessions** (timeouts) · **Keys** (rebind) · **Notifications** · **Theme** (palette, startup animation).
 Stored at `~/.config/maximus/config.toml`; project list + layout in `~/.local/state/maximus/`.
 
 Timeouts (each can be off):
