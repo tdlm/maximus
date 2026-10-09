@@ -139,9 +139,13 @@ reloads on what's left so a changeset can be split into several commits, and clo
 
 A login shell (`$SHELL -l`) in the focused session's checkout (else the selected project), in a
 nearly-full-screen overlay. Keys go to the shell except ctrl+t, which hides the overlay; the shell
-keeps running hidden (dev servers, watchers) and ctrl+t shows the same one again. One shell per
-checkout. Exiting the shell (`exit`, ctrl+d) closes the overlay and forgets it. Quitting maximus
-counts running shells in its confirm; merging or discarding a worktree stops its shell.
+keeps running hidden (dev servers, watchers) and ctrl+t shows the same one again. A checkout can
+have several shells, shown as tabs in the overlay's top border and named after what's running in
+the foreground (`zsh`, `node`, ...): alt+t starts another, the prev/next-session keys (alt+↑/↓)
+step through them, and alt+1–9 jumps to one. ctrl+t brings back the tab used last. Exiting a shell
+(`exit`, ctrl+d) closes its tab and shows a neighbor, or closes the overlay with the last one.
+Quitting maximus counts running shells in its confirm; merging or discarding a worktree stops its
+shells.
 
 ## Memory (ctrl+y)
 
