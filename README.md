@@ -93,7 +93,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+y`   | Memory used by claude sessions, shells and maximus |
 | `ctrl+n`   | Overview of every agent as tiles         |
 | `ctrl+s`   | Settings                                 |
-| `f1`       | All keyboard shortcuts, in a scrollable list |
+| `ctrl+/`   | All keyboard shortcuts, in a scrollable list |
 | `alt+↓/↑`  | Next/previous session in agent-list order, wrapping around; in the left column, move between Agents and Graph |
 | `alt+←/→`  | Focus agent list / pane                  |
 | `ctrl+q`   | Show/hide the commit graph               |
@@ -156,9 +156,9 @@ attention order, so whatever needs you comes first; tiles needing input get a re
 finished ones a blue one. A line at the top counts each status. Arrows or `hjkl` move, `enter` or a
 click opens the session (resuming it if stopped), `esc` or `ctrl+n` closes.
 
-Keyboard shortcuts (`f1`, or `?` in the agent list): every shortcut in one modal, grouped by where
-it works, with global keys showing your current bindings. `j/k`, arrows, `PgUp/PgDn` or the mouse
-wheel scroll it when it doesn't fit; `esc` or `f1` closes.
+Keyboard shortcuts (`ctrl+/`, or `?` in the agent list): every shortcut in one modal, grouped by
+where it works, with global keys showing your current bindings. `j/k`, arrows, `PgUp/PgDn` or the
+mouse wheel scroll it when it doesn't fit; `esc` or `ctrl+/` closes.
 
 Mouse: click to select/focus, drag the pane separators, scroll lists, panes and diffs.
 

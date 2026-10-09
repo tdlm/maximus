@@ -163,7 +163,7 @@ impl Default for Keys {
             terminal: "ctrl+t".into(),
             memory: "ctrl+y".into(),
             overview: "ctrl+n".into(),
-            help: "f1".into(),
+            help: "ctrl+/".into(),
         }
     }
 }
@@ -176,10 +176,17 @@ impl Config {
     pub fn load() -> Self {
         let path = Self::path();
         match fs::read_to_string(&path) {
-            Ok(s) => toml::from_str(&s).unwrap_or_else(|e| {
-                eprintln!("maximus: ignoring invalid {}: {e}", path.display());
-                Self::default()
-            }),
+            Ok(s) => {
+                let mut cfg: Self = toml::from_str(&s).unwrap_or_else(|e| {
+                    eprintln!("maximus: ignoring invalid {}: {e}", path.display());
+                    Self::default()
+                });
+                // f1 was the default before ctrl+/; move configs saved with it.
+                if cfg.keys.help == "f1" {
+                    cfg.keys.help = Keys::default().help;
+                }
+                cfg
+            }
             Err(_) => {
                 let cfg = Self::default();
                 let _ = cfg.save();

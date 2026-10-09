@@ -10,10 +10,12 @@ const MODS: KeyModifiers = KeyModifiers::CONTROL
     .union(KeyModifiers::ALT)
     .union(KeyModifiers::SHIFT);
 
-/// Normalize an event so `Char('P')` and `shift+p` compare equal.
+/// Normalize an event so `Char('P')` and `shift+p` compare equal, and so `ctrl+/` matches
+/// the `ctrl+7` legacy terminals report for it.
 fn normalize(code: KeyCode, mods: KeyModifiers) -> (KeyCode, KeyModifiers) {
     let mut mods = mods & MODS;
     let code = match code {
+        KeyCode::Char('7') if mods.contains(KeyModifiers::CONTROL) => KeyCode::Char('/'),
         KeyCode::Char(c) if c.is_ascii_uppercase() => {
             mods |= KeyModifiers::SHIFT;
             KeyCode::Char(c.to_ascii_lowercase())
@@ -286,6 +288,10 @@ mod tests {
         assert_eq!(b.short(), "⌥↓");
         let b = Binding::parse("ctrl+,").unwrap();
         assert_eq!(b.to_config(), "ctrl+,");
+        let b = Binding::parse("ctrl+/").unwrap();
+        assert!(b.matches(&KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL)));
+        assert!(b.matches(&KeyEvent::new(KeyCode::Char('7'), KeyModifiers::CONTROL)));
+        assert!(!b.matches(&KeyEvent::new(KeyCode::Char('7'), KeyModifiers::NONE)));
     }
 
     #[test]

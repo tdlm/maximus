@@ -57,7 +57,7 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 | ctrl+y   | Memory usage                              |
 | ctrl+n   | Agent overview                            |
 | ctrl+s   | Settings                                  |
-| f1       | Keyboard shortcuts                        |
+| ctrl+/   | Keyboard shortcuts                        |
 | alt+↑/↓  | Prev/next session in the agent list      |
 | alt+←/→  | Focus agent list / pane                   |
 
@@ -162,13 +162,14 @@ tile per visible session, in attention order. Each tile shows the status dot and
 finished ones blue. A summary line counts each status. Arrows/`hjkl` move, enter or a click opens
 the session (resuming a stopped one), esc closes. Rows scroll when there are more tiles than fit.
 
-## Keyboard shortcuts (f1)
+## Keyboard shortcuts (ctrl+/)
 
 A centered modal listing every shortcut, grouped by where it works: global, agent list, pane,
 commit graph, new prompt, diff viewer, commit, terminal and overview. Global keys show the user's
 current bindings. Also `?` in the agent list and **Keyboard shortcuts** in the switcher. When the
 list is taller than the screen it scrolls (`j/k`, arrows, PgUp/PgDn, `g/G`, mouse wheel) and the
-title shows which lines are in view; esc, `?` or f1 closes.
+title shows which lines are in view; esc, `?` or ctrl+/ closes. Legacy terminals report ctrl+/ as
+ctrl+7, which matches too. A config still holding the old `f1` default moves to ctrl+/ on load.
 
 ## Settings (ctrl+s)
 
