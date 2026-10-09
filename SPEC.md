@@ -166,10 +166,13 @@ the session (resuming a stopped one), esc closes. Rows scroll when there are mor
 
 A centered modal listing every shortcut, grouped by where it works: global, agent list, pane,
 commit graph, new prompt, diff viewer, commit, terminal and overview. Global keys show the user's
-current bindings. Also `?` in the agent list and **Keyboard shortcuts** in the switcher. When the
-list is taller than the screen it scrolls (`j/k`, arrows, PgUp/PgDn, `g/G`, mouse wheel) and the
-title shows which lines are in view; esc, `?` or ctrl+/ closes. Legacy terminals report ctrl+/ as
-ctrl+7, which matches too. A config still holding the old `f1` default moves to ctrl+/ on load.
+current bindings. Also `?` in the agent list and **Keyboard shortcuts** in the switcher. A filter
+line at the top narrows the list as you type: each word must appear in the row's key, description
+or group title (`ctrl`, `alt`, `shift` also match `^`, `⌥`, `⇧`), and empty groups drop out. The
+modal keeps its size while filtering. When the list is taller than the screen it scrolls (arrows,
+PgUp/PgDn, Home/End, mouse wheel) and the title shows which lines are in view. esc clears the
+filter, then closes; ctrl+/ closes. Legacy terminals report ctrl+/ as ctrl+7, which matches too.
+A config still holding the old `f1` default moves to ctrl+/ on load.
 
 ## Settings (ctrl+s)
 

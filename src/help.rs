@@ -8,7 +8,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::{app::GlobalKeys, theme::Theme, ui};
+use crate::{app::GlobalKeys, textinput::TextInput, theme::Theme, ui};
 
 /// A titled group of `(key, action)` rows.
 type Section = (&'static str, Vec<(String, &'static str)>);
@@ -149,8 +149,39 @@ pub enum HelpAction {
     Close,
 }
 
+/// Whether every word of the lowercased `query` appears in the row, its key spelled out
+/// (`^g` also matches "ctrl g") or its section's title.
+fn row_matches(query: &str, section: &str, key: &str, desc: &str) -> bool {
+    let spelled = key
+        .replace('^', "ctrl ")
+        .replace('⌥', "alt ")
+        .replace('⇧', "shift ");
+    let hay = format!("{section} {key} {spelled} {desc}").to_lowercase();
+    query.split_whitespace().all(|w| hay.contains(w))
+}
+
+/// Sections cut down to the rows matching `query`, dropping any left empty.
+fn filter(sections: Vec<Section>, query: &str) -> Vec<Section> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return sections;
+    }
+    sections
+        .into_iter()
+        .filter_map(|(title, rows)| {
+            let rows: Vec<_> = rows
+                .into_iter()
+                .filter(|(k, d)| row_matches(&query, title, k, d))
+                .collect();
+            (!rows.is_empty()).then_some((title, rows))
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub struct Help {
+    /// Filter typed at the top.
+    input: TextInput,
     /// First visible line.
     offset: usize,
     /// Lines and visible rows last drawn, for clamping scrolls.
@@ -167,17 +198,32 @@ impl Help {
         self.offset = (self.offset as i64 + d).clamp(0, self.max_offset() as i64) as usize;
     }
 
+    pub fn paste(&mut self, s: &str) {
+        self.input.insert_str(s);
+        self.offset = 0;
+    }
+
     pub fn handle_key(&mut self, k: KeyEvent) -> HelpAction {
         let page = self.visible.saturating_sub(1).max(1) as i64;
         match k.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => return HelpAction::Close,
-            KeyCode::Down | KeyCode::Char('j') => self.scroll(1),
-            KeyCode::Up | KeyCode::Char('k') => self.scroll(-1),
-            KeyCode::PageDown | KeyCode::Char(' ') => self.scroll(page),
+            KeyCode::Esc if !self.input.text.is_empty() => {
+                self.input.set("");
+                self.offset = 0;
+            }
+            KeyCode::Esc => return HelpAction::Close,
+            KeyCode::Down => self.scroll(1),
+            KeyCode::Up => self.scroll(-1),
+            KeyCode::PageDown => self.scroll(page),
             KeyCode::PageUp => self.scroll(-page),
-            KeyCode::Home | KeyCode::Char('g') => self.offset = 0,
-            KeyCode::End | KeyCode::Char('G') => self.offset = self.max_offset(),
-            _ => {}
+            KeyCode::Home => self.offset = 0,
+            KeyCode::End => self.offset = self.max_offset(),
+            _ => {
+                let before = self.input.text.clone();
+                self.input.handle_key(&k);
+                if self.input.text != before {
+                    self.offset = 0;
+                }
+            }
         }
         HelpAction::None
     }
@@ -191,34 +237,39 @@ impl Help {
     }
 
     pub fn draw(&mut self, f: &mut Frame, area: Rect, keys: &GlobalKeys, t: &Theme) {
-        let sections = sections(keys);
-        let kw = sections
+        let all = sections(keys);
+        let key = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
+        let muted = Style::default().fg(t.muted);
+        let head = Style::default().fg(t.fg).add_modifier(Modifier::BOLD);
+        let to_lines = |sections: &[Section], kw: usize| {
+            let mut lines: Vec<Line<'static>> = vec![];
+            for (i, (title, rows)) in sections.iter().enumerate() {
+                if i > 0 {
+                    lines.push(Line::raw(""));
+                }
+                lines.push(Line::styled(format!(" {title}"), head));
+                for (k, desc) in rows {
+                    lines.push(Line::from(vec![
+                        Span::raw(" ".repeat(3 + kw - k.width())),
+                        Span::styled(k.clone(), key),
+                        Span::styled(format!("  {desc}"), muted),
+                    ]));
+                }
+            }
+            lines
+        };
+
+        // Size the modal and key column from the full list so filtering doesn't resize it.
+        let kw = all
             .iter()
             .flat_map(|(_, rows)| rows.iter().map(|(k, _)| k.width()))
             .max()
             .unwrap_or(0);
-        let key = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
-        let muted = Style::default().fg(t.muted);
-        let head = Style::default().fg(t.fg).add_modifier(Modifier::BOLD);
-
-        let mut lines: Vec<Line<'static>> = vec![];
-        for (i, (title, rows)) in sections.iter().enumerate() {
-            if i > 0 {
-                lines.push(Line::raw(""));
-            }
-            lines.push(Line::styled(format!(" {title}"), head));
-            for (k, desc) in rows {
-                lines.push(Line::from(vec![
-                    Span::raw(" ".repeat(3 + kw - k.width())),
-                    Span::styled(k.clone(), key),
-                    Span::styled(format!("  {desc}"), muted),
-                ]));
-            }
-        }
-        let content_w = lines.iter().map(|l| l.width()).max().unwrap_or(0) as u16 + 2;
-
+        let full = to_lines(&all, kw);
+        let content_w = full.iter().map(|l| l.width()).max().unwrap_or(0) as u16 + 2;
         let w = (content_w + 2).clamp(40.min(area.width), area.width);
-        let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2).max(5));
+        // Borders, filter and separator around the list.
+        let h = (full.len() as u16 + 4).min(area.height.saturating_sub(2).max(7));
         let r = Rect {
             x: area.x + (area.width - w) / 2,
             y: area.y + (area.height.saturating_sub(h)) / 2,
@@ -226,8 +277,9 @@ impl Help {
             height: h.min(area.height),
         };
 
+        let lines = to_lines(&filter(all, &self.input.text), kw);
         self.total = lines.len();
-        self.visible = r.height.saturating_sub(2) as usize;
+        self.visible = r.height.saturating_sub(4) as usize;
         self.offset = self.offset.min(self.max_offset());
 
         let mut title = " Keyboard shortcuts ".to_string();
@@ -240,24 +292,61 @@ impl Help {
             );
         }
         f.render_widget(Clear, r);
+        let esc = if self.input.text.is_empty() {
+            " close "
+        } else {
+            " clear "
+        };
         let block = ui::modal_block(&title, t).title_bottom(Line::from(vec![
             Span::styled(" ↑↓", key),
             Span::styled(" scroll  ", muted),
             Span::styled("esc", key),
-            Span::styled(" / ", muted),
-            Span::styled(keys.help.short(), key),
-            Span::styled(" close ", muted),
+            Span::styled(esc, muted),
         ]));
         let inner = block.inner(r);
         f.render_widget(block, r);
-        let width = inner.width as usize;
-        let lines: Vec<Line> = lines
-            .into_iter()
-            .skip(self.offset)
-            .take(self.visible)
-            .map(|l| ui::truncate_line(l, width))
-            .collect();
-        f.render_widget(Paragraph::new(lines), inner);
+
+        let input_area = Rect { height: 1, ..inner };
+        let (text, (_, ccol)) = self.input.layout(inner.width.saturating_sub(4) as usize);
+        let text = text.last().cloned().unwrap_or_default();
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(" › ", Style::default().fg(t.accent)),
+                if self.input.text.is_empty() {
+                    Span::styled("type to filter…", muted)
+                } else {
+                    Span::styled(text, Style::default().fg(t.fg))
+                },
+            ])),
+            input_area,
+        );
+        f.set_cursor_position((input_area.x + 3 + ccol as u16, input_area.y));
+        f.render_widget(
+            Paragraph::new("─".repeat(inner.width as usize)).style(Style::default().fg(t.border)),
+            Rect {
+                y: inner.y + 1,
+                height: 1,
+                ..inner
+            },
+        );
+
+        let list = Rect {
+            y: inner.y + 2,
+            height: inner.height.saturating_sub(2),
+            ..inner
+        };
+        let width = list.width as usize;
+        let lines: Vec<Line> = if lines.is_empty() {
+            vec![Line::styled("  No matches", muted)]
+        } else {
+            lines
+                .into_iter()
+                .skip(self.offset)
+                .take(self.visible)
+                .map(|l| ui::truncate_line(l, width))
+                .collect()
+        };
+        f.render_widget(Paragraph::new(lines), list);
     }
 }
 
@@ -273,13 +362,13 @@ mod tests {
     #[test]
     fn scrolls_within_the_list() {
         let mut h = Help {
-            offset: 0,
             total: 30,
             visible: 10,
+            ..Help::default()
         };
         h.handle_key(key(KeyCode::Up));
         assert_eq!(h.offset, 0);
-        h.handle_key(key(KeyCode::Char('j')));
+        h.handle_key(key(KeyCode::Down));
         assert_eq!(h.offset, 1);
         h.handle_key(key(KeyCode::PageDown));
         assert_eq!(h.offset, 10);
@@ -290,5 +379,52 @@ mod tests {
         h.handle_key(key(KeyCode::Home));
         assert_eq!(h.offset, 0);
         assert!(matches!(h.handle_key(key(KeyCode::Esc)), HelpAction::Close));
+    }
+
+    #[test]
+    fn typing_filters_and_esc_clears_then_closes() {
+        let mut h = Help {
+            offset: 5,
+            total: 30,
+            visible: 10,
+            ..Help::default()
+        };
+        for c in "j k".chars() {
+            h.handle_key(key(KeyCode::Char(c)));
+        }
+        assert_eq!(h.input.text, "j k");
+        assert_eq!(h.offset, 0);
+        assert!(matches!(h.handle_key(key(KeyCode::Esc)), HelpAction::None));
+        assert_eq!(h.input.text, "");
+        assert!(matches!(h.handle_key(key(KeyCode::Esc)), HelpAction::Close));
+    }
+
+    #[test]
+    fn filters_rows_by_words_keys_and_section() {
+        let k = GlobalKeys::from(&crate::config::Config::default());
+        let rows = |q: &str| -> Vec<(&str, String)> {
+            filter(sections(&k), q)
+                .into_iter()
+                .flat_map(|(t, rows)| rows.into_iter().map(move |(k, _)| (t, k)))
+                .collect()
+        };
+        let all: usize = sections(&k).iter().map(|(_, r)| r.len()).sum();
+        assert_eq!(rows(" ").len(), all);
+        // Words match anywhere in the row, in any order.
+        assert_eq!(
+            rows("hunk previous"),
+            vec![("Diff viewer", "J K".to_string())]
+        );
+        // Spelled-out modifiers match the short form.
+        assert!(rows("ctrl g").contains(&("Global", "^g".to_string())));
+        // A section title keeps all its rows.
+        assert_eq!(
+            rows("overview")
+                .iter()
+                .filter(|(t, _)| *t == "Overview")
+                .count(),
+            4
+        );
+        assert!(rows("zzz").is_empty());
     }
 }

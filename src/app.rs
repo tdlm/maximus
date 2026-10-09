@@ -118,7 +118,7 @@ pub struct GlobalKeys {
 }
 
 impl GlobalKeys {
-    fn from(cfg: &Config) -> Self {
+    pub fn from(cfg: &Config) -> Self {
         let k = &cfg.keys;
         Self {
             switcher: KeySet::parse(&k.switcher),
@@ -1206,6 +1206,7 @@ impl App {
     fn handle_paste(&mut self, s: &str) {
         match &mut self.modal {
             Some(Modal::Switcher(sw)) => sw.paste(s),
+            Some(Modal::Help(h)) => h.paste(s),
             Some(Modal::Prompt(p)) => p.paste(s),
             Some(Modal::Settings(st)) => st.paste(s),
             Some(Modal::Rename(r)) => r.input.insert_str(s),
