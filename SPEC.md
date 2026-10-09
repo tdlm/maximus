@@ -71,6 +71,14 @@ One fuzzy list, sectioned:
    default model, open settings, …
 4. **Add folder** — fuzzy directory finder (rooted at configurable dirs, e.g. `~/Dev`)
 
+## New project
+
+`N` in the agent list or **New project** in the switcher. A small modal takes a folder name,
+created under the first project root (`~/Dev`); a relative path nests under it and `~/…` or `/…`
+goes anywhere, creating missing parents (shown before you commit). The target is validated live —
+invalid names and existing paths show why in red and enter does nothing. `tab` toggles `git init`,
+and the choice is remembered. The new folder is added as a project and the new prompt opens on it.
+
 ## New prompt (ctrl+j)
 
 Centered modal:

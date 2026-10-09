@@ -252,6 +252,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             );
             f.set_cursor_position((inner.x + 3 + ccol as u16, inner.y));
         }
+        Some(Modal::NewProject(np)) => np.draw(f, area, theme),
         Some(Modal::Memory(u)) => draw_memory(f, area, u.as_ref(), &app.keys, theme),
         Some(Modal::Terminal(_)) | None => {}
     }
@@ -576,6 +577,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
     let shortcuts: Vec<(String, &str)> = vec![
         (k.new_prompt.short(), "New prompt"),
         ("w".into(), "New prompt in a new worktree"),
+        ("N".into(), "New project in a new folder"),
         (k.switcher.short(), "Switch sessions, projects, commands"),
         (k.next_session.short(), "Jump to the session that needs you"),
         (

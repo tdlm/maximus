@@ -241,6 +241,8 @@ pub struct State {
     /// Graph panel height in rows; 0 sizes it automatically.
     pub graph_height: u16,
     pub list_sort: ListSort,
+    /// Whether the new-project modal starts with git init checked (the last choice).
+    pub new_project_git: bool,
     pub sessions: Vec<SessionRecord>,
 }
 
@@ -254,6 +256,7 @@ impl Default for State {
             graph_open: true,
             graph_height: 0,
             list_sort: ListSort::Attention,
+            new_project_git: true,
             sessions: vec![],
         }
     }

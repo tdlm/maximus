@@ -17,6 +17,7 @@ use crate::{
     hooks::HookMsg,
     keys::{self, KeySet},
     memory::{self, Usage},
+    newproject::{NewProject, NewProjectAction},
     notify,
     prompt::{Launch, Prompt, PromptAction, Tree},
     session::{self, Session, Status},
@@ -86,6 +87,7 @@ pub enum Modal {
     Settings(SettingsModal),
     Confirm(Confirm),
     Rename(Rename),
+    NewProject(NewProject),
     /// Shows the terminal with this id.
     Terminal(u64),
     /// Memory use of sessions, shells and maximus; None until the first measurement.
@@ -1183,6 +1185,7 @@ impl App {
             Some(Modal::Prompt(p)) => p.paste(s),
             Some(Modal::Settings(st)) => st.paste(s),
             Some(Modal::Rename(r)) => r.input.insert_str(s),
+            Some(Modal::NewProject(np)) => np.paste(s),
             Some(Modal::Diff(d)) => d.paste(s),
             Some(Modal::Terminal(id)) => {
                 if let Some(t) = self.terminals.iter_mut().find(|t| t.id == *id) {
@@ -1261,6 +1264,13 @@ impl App {
             ..cmd("New prompt".into(), Cmd::NewPrompt)
         });
         items.push(cmd("New prompt in a new worktree".into(), Cmd::NewWorktree));
+        items.push(Item {
+            detail: "N".into(),
+            ..cmd(
+                "New project (create a folder)".into(),
+                Cmd::NewProject(String::new()),
+            )
+        });
         items.push(Item {
             detail: k.diff.short(),
             ..cmd("View changes (diff)".into(), Cmd::Diff)
@@ -1421,6 +1431,31 @@ impl App {
         }
     }
 
+    /// Opens the new-project modal, creating folders under the first project root.
+    fn open_new_project(&mut self, text: &str) {
+        let base = self
+            .cfg
+            .project_roots
+            .first()
+            .map(|r| expand(r))
+            .unwrap_or_else(crate::config::home);
+        let np = NewProject::new(base, self.state.new_project_git, text);
+        self.modal = Some(Modal::NewProject(np));
+    }
+
+    fn project_created(&mut self, path: PathBuf, git_err: Option<String>) {
+        self.add_project(path.clone());
+        self.scan_folders();
+        match git_err {
+            Some(e) => self.toast(format!(
+                "Created {}, but git init failed: {e}",
+                tilde(&path)
+            )),
+            None => self.toast(format!("Created {}", tilde(&path))),
+        }
+        self.open_prompt(false);
+    }
+
     fn open_rename(&mut self, id: String) {
         let Some(s) = self.session(&id) else { return };
         let input = TextInput::with_text(&s.name, false);
@@ -1548,6 +1583,7 @@ impl App {
             Action::Cmd(c) => match c {
                 Cmd::NewPrompt => self.open_prompt(false),
                 Cmd::NewWorktree => self.open_prompt(true),
+                Cmd::NewProject(text) => self.open_new_project(&text),
                 Cmd::Diff => self.open_diff(false),
                 Cmd::Commit => self.open_diff(true),
                 Cmd::Terminal => self.open_terminal(),
@@ -1679,6 +1715,19 @@ impl App {
                         self.close_modal();
                     }
                 }
+                Modal::NewProject(np) => match np.handle_key(k) {
+                    NewProjectAction::None => {}
+                    NewProjectAction::Close => {
+                        self.state.new_project_git = np.git;
+                        let _ = self.state.save();
+                        self.modal = None;
+                    }
+                    NewProjectAction::Created(path, git_err) => {
+                        self.state.new_project_git = np.git;
+                        self.modal = None;
+                        self.project_created(path, git_err);
+                    }
+                },
                 Modal::Rename(r) => match k.code {
                     KeyCode::Enter => {
                         let name = r.input.text.trim().to_string();
@@ -1898,6 +1947,7 @@ impl App {
             },
             KeyCode::Char('n') => self.open_prompt(false),
             KeyCode::Char('w') => self.open_prompt(true),
+            KeyCode::Char('N') => self.open_new_project(""),
             KeyCode::Char('r') => {
                 if let Some(RowKey::Session(id)) = self.selected.clone() {
                     self.resume(&id);

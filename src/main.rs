@@ -6,6 +6,7 @@ mod hooks;
 mod intro;
 mod keys;
 mod memory;
+mod newproject;
 mod notify;
 mod prompt;
 mod session;

@@ -16,6 +16,8 @@ use crate::{config::expand, textinput::TextInput, theme::Theme, ui};
 pub enum Cmd {
     NewPrompt,
     NewWorktree,
+    /// Opens the new-project modal with this text filled in.
+    NewProject(String),
     Diff,
     Settings,
     RemoveProject(PathBuf),
@@ -99,21 +101,28 @@ impl Switcher {
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         self.shown = scored.into_iter().map(|(_, _, it)| it).collect();
-        // A literal path that isn't listed yet.
+        // A literal path that isn't listed yet: add it, or create it if it's not there.
         if q.starts_with('/') || q.starts_with('~') {
             let p = expand(&q);
-            if p.is_dir() {
-                self.shown.insert(
-                    0,
-                    Item {
-                        label: format!("Add folder {}", crate::config::tilde(&p)),
-                        detail: String::new(),
-                        tag: "add",
-                        dot: None,
-                        action: Action::AddFolder(p),
-                    },
-                );
-            }
+            let shown = crate::config::tilde(&p);
+            let item = if p.is_dir() {
+                Item {
+                    label: format!("Add folder {shown}"),
+                    detail: String::new(),
+                    tag: "add",
+                    dot: None,
+                    action: Action::AddFolder(p),
+                }
+            } else {
+                Item {
+                    label: format!("New project at {shown}"),
+                    detail: String::new(),
+                    tag: "create",
+                    dot: None,
+                    action: Action::Cmd(Cmd::NewProject(q.clone())),
+                }
+            };
+            self.shown.insert(0, item);
         }
     }
 

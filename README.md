@@ -97,7 +97,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+q`   | Show/hide the commit graph               |
 
 Agent list: `j/k` move · `enter` open (resumes stopped) · `n` new prompt · `w` new prompt in a new
-worktree · `r` resume · `e` rename session · `x` close session / remove project · `m` merge worktree · `d` diff · `t` graph · `s` sort (attention → name A→Z → Z→A) · `/` switcher · `,` settings · `q` quit.
+worktree · `N` new project · `r` resume · `e` rename session · `x` close session / remove project · `m` merge worktree · `d` diff · `t` graph · `s` sort (attention → name A→Z → Z→A) · `/` switcher · `,` settings · `q` quit.
 
 Graph (commits on the current session's checkout): the selected commit expands to show its changed
 files · `j/k` move through commits and files · a selected file's diff shows on the right
@@ -112,6 +112,14 @@ merging.
 
 Pane: everything goes to claude. `shift+PgUp/PgDn` or the mouse wheel scrolls back; drag to select
 and copy.
+
+New project (`N`, or **New project** in the switcher): type a folder name and it's created in your
+first project root (`~/Dev` by default); a relative path like `work/app` nests under it, and
+`~/…` or `/…` puts it anywhere. Missing parent folders are created too, and the modal says so.
+The path is checked as you type — empty names, `.`/`..`, `:`, control characters, leading or
+trailing spaces, names over 255 bytes, and paths that already exist are refused with the reason.
+`tab` toggles `git init` (remembered). The folder is added as a project and a new prompt opens
+in it. Typing a path that doesn't exist into the switcher offers to create it the same way.
 
 New prompt: `enter` send · `alt/shift+enter` newline · `ctrl+p` project · `ctrl+t` worktree
 (main / existing / new) · `ctrl+o` model (←/→ effort) · `tab` rename the new branch.

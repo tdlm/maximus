@@ -300,6 +300,11 @@ pub fn commit_files(dir: &Path, hash: &str) -> Result<Vec<Change>> {
     Ok(res)
 }
 
+/// Makes `dir` a new git repository.
+pub fn init(dir: &Path) -> Result<()> {
+    git(dir, &["init", "-q"]).map(|_| ())
+}
+
 /// File contents at `rev`, or None if absent.
 pub fn show_file(dir: &Path, rev: &str, path: &str) -> Option<Vec<u8>> {
     git(dir, &["show", &format!("{rev}:{path}")]).ok()
