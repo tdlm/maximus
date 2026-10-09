@@ -28,6 +28,7 @@ pub enum Cmd {
     Terminal,
     Memory,
     Overview,
+    Help,
     MergeWorktree(String),
     DiscardWorktree(String),
     DefaultModel(String),

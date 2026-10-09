@@ -262,6 +262,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             &app.keys.overview.short(),
             theme,
         ),
+        Some(Modal::Help(h)) => h.draw(f, area, &app.keys, theme),
         Some(Modal::Memory(u)) => draw_memory(f, area, u.as_ref(), &app.keys, theme),
         Some(Modal::Terminal(_)) | None => {}
     }
@@ -602,6 +603,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
         ("e".into(), "Rename the selected session"),
         ("x".into(), "Close session / remove project"),
         (k.settings.short(), "Settings and key bindings"),
+        (k.help.short(), "All keyboard shortcuts"),
     ];
     // Message, blank line, then as many shortcuts as fit.
     let room = (area.height as usize).saturating_sub(2);

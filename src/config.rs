@@ -144,6 +144,7 @@ pub struct Keys {
     pub terminal: String,
     pub memory: String,
     pub overview: String,
+    pub help: String,
 }
 
 impl Default for Keys {
@@ -162,6 +163,7 @@ impl Default for Keys {
             terminal: "ctrl+t".into(),
             memory: "ctrl+y".into(),
             overview: "ctrl+n".into(),
+            help: "f1".into(),
         }
     }
 }

@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod diff;
 mod git;
+mod help;
 mod hooks;
 mod intro;
 mod keys;

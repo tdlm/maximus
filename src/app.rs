@@ -14,6 +14,7 @@ use crate::{
     config::{Config, ListSort, ProjectEntry, State, expand, tilde},
     diff::{DiffAction, DiffView, FilePreview},
     git::{self, GraphRow},
+    help::{Help, HelpAction},
     hooks::HookMsg,
     keys::{self, KeySet},
     memory::{self, Usage},
@@ -95,6 +96,8 @@ pub enum Modal {
     Memory(Option<Usage>),
     /// Every agent as a tile.
     Overview(Overview),
+    /// Every keyboard shortcut.
+    Help(Help),
 }
 
 pub struct GlobalKeys {
@@ -111,6 +114,7 @@ pub struct GlobalKeys {
     pub terminal: KeySet,
     pub memory: KeySet,
     pub overview: KeySet,
+    pub help: KeySet,
 }
 
 impl GlobalKeys {
@@ -130,6 +134,7 @@ impl GlobalKeys {
             terminal: KeySet::parse(&k.terminal),
             memory: KeySet::parse(&k.memory),
             overview: KeySet::parse(&k.overview),
+            help: KeySet::parse(&k.help),
         }
     }
 }
@@ -1298,6 +1303,10 @@ impl App {
             ..cmd("Agent overview".into(), Cmd::Overview)
         });
         items.push(Item {
+            detail: k.help.short(),
+            ..cmd("Keyboard shortcuts".into(), Cmd::Help)
+        });
+        items.push(Item {
             detail: k.memory.short(),
             ..cmd("Memory usage".into(), Cmd::Memory)
         });
@@ -1501,6 +1510,10 @@ impl App {
         self.modal = Some(Modal::Terminal(id));
     }
 
+    fn open_help(&mut self) {
+        self.modal = Some(Modal::Help(Help::default()));
+    }
+
     fn open_overview(&mut self) {
         self.modal = Some(Modal::Overview(Overview::default()));
     }
@@ -1616,6 +1629,7 @@ impl App {
                 Cmd::Terminal => self.open_terminal(),
                 Cmd::Memory => self.open_memory(),
                 Cmd::Overview => self.open_overview(),
+                Cmd::Help => self.open_help(),
                 Cmd::Settings => self.modal = Some(Modal::Settings(SettingsModal::new())),
                 Cmd::RemoveProject(p) => self.request_remove_project(p),
                 Cmd::CloseSession(id) => self.request_close_session(id),
@@ -1754,6 +1768,13 @@ impl App {
                         }
                     }
                 }
+                Modal::Help(h) => {
+                    if self.keys.help.matches(&k) {
+                        self.close_modal();
+                    } else if let HelpAction::Close = h.handle_key(k) {
+                        self.close_modal();
+                    }
+                }
                 Modal::NewProject(np) => match np.handle_key(k) {
                     NewProjectAction::None => {}
                     NewProjectAction::Close => {
@@ -1810,6 +1831,9 @@ impl App {
         }
         if g.overview.matches(&k) {
             return self.open_overview();
+        }
+        if g.help.matches(&k) {
+            return self.open_help();
         }
         if g.settings.matches(&k) {
             self.modal = Some(Modal::Settings(SettingsModal::new()));
@@ -1991,6 +2015,7 @@ impl App {
             KeyCode::Char('w') => self.open_prompt(true),
             KeyCode::Char('N') => self.open_new_project(""),
             KeyCode::Char('o') => self.open_overview(),
+            KeyCode::Char('?') => self.open_help(),
             KeyCode::Char('r') => {
                 if let Some(RowKey::Session(id)) = self.selected.clone() {
                     self.resume(&id);
@@ -2060,6 +2085,7 @@ impl App {
                         self.open_from_overview(&id);
                     }
                 }
+                Modal::Help(h) => h.handle_mouse(m),
                 Modal::Settings(s) => {
                     if let SettingsAction::Changed = s.handle_mouse(m, &mut self.cfg) {
                         self.settings_changed();
