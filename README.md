@@ -140,8 +140,10 @@ the right and your message is kept.
 Terminal (`ctrl+t`): a shell in the current session's checkout (or the selected project), over
 the main screen. Everything you type goes to the shell except `ctrl+t`, which hides the terminal and
 leaves the shell running, so a dev server or watcher keeps going; `ctrl+t` brings back the same
-shell. `exit` or `ctrl+d` ends the shell and closes the terminal. Each checkout gets its own shell.
-`shift+PgUp/PgDn` or the mouse wheel scrolls back. Quitting asks first while any shell is running.
+shell. Need a second one beside the dev server? `alt+t` opens another shell in the same checkout as
+a tab, named after whatever it's running; `alt+↑/↓` switches between tabs and `alt+1`–`9` jumps
+straight to one. `exit` or `ctrl+d` ends a shell and closes its tab. `shift+PgUp/PgDn` or the mouse
+wheel scrolls back. Quitting asks first while any shell is running.
 
 Memory (`ctrl+y`): resident memory of each running claude session, each terminal shell, and
 maximus itself, with the total. A session or shell counts everything it started (tools, MCP
