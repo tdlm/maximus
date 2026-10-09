@@ -90,6 +90,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+g`   | Diff viewer for the current session's checkout |
 | `ctrl+k`   | Commit the current session's changes     |
 | `ctrl+t`   | Terminal in the current session's checkout (again to hide) |
+| `ctrl+y`   | Memory used by claude sessions, shells and maximus |
 | `ctrl+s`   | Settings                                 |
 | `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen); in the left column, move between Agents and Graph |
 | `alt+←/→`  | Focus agent list / pane                  |
@@ -131,6 +132,11 @@ the main screen. Everything you type goes to the shell except `ctrl+t`, which hi
 leaves the shell running, so a dev server or watcher keeps going; `ctrl+t` brings back the same
 shell. `exit` or `ctrl+d` ends the shell and closes the terminal. Each checkout gets its own shell.
 `shift+PgUp/PgDn` or the mouse wheel scrolls back. Quitting asks first while any shell is running.
+
+Memory (`ctrl+y`): resident memory of each running claude session, each terminal shell, and
+maximus itself, with the total. A session or shell counts everything it started (tools, MCP
+servers, a dev server), so the total is what maximus is responsible for. It refreshes every two
+seconds while open; `esc` or `ctrl+y` closes it.
 
 Mouse: click to select/focus, drag the pane separators, scroll lists, panes and diffs.
 

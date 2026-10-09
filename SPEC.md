@@ -54,12 +54,13 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 | ctrl+g   | Diff viewer for focused session's tree    |
 | ctrl+k   | Commit the focused session's changes      |
 | ctrl+t   | Terminal in the focused session's tree    |
+| ctrl+y   | Memory usage                              |
 | ctrl+s   | Settings                                  |
 | alt+↑/↓  | Prev/next session (attention order)       |
 | alt+←/→  | Focus agent list / pane                   |
 
 All rebindable in settings. Note: these keys are then unavailable to claude itself
-(e.g. ctrl+p history-prev, ctrl+j newline, ctrl+k kill-line, ctrl+t task list).
+(e.g. ctrl+p history-prev, ctrl+j newline, ctrl+k kill-line, ctrl+t task list, ctrl+y yank).
 
 ## Switcher (ctrl+p)
 
@@ -130,6 +131,13 @@ nearly-full-screen overlay. Keys go to the shell except ctrl+t, which hides the 
 keeps running hidden (dev servers, watchers) and ctrl+t shows the same one again. One shell per
 checkout. Exiting the shell (`exit`, ctrl+d) closes the overlay and forgets it. Quitting maximus
 counts running shells in its confirm; merging or discarding a worktree stops its shell.
+
+## Memory (ctrl+y)
+
+A small centered modal listing resident memory (RSS from `ps`) for each live claude session and
+each terminal shell — each counted with its whole process tree, so tools, MCP servers and dev
+servers land on whatever started them — then maximus itself and the total. Refreshes every two
+seconds while open. RSS counts shared pages once per process, so totals run a little high.
 
 ## Settings (ctrl+s)
 

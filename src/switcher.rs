@@ -24,6 +24,7 @@ pub enum Cmd {
     ResumeSession(String),
     Commit,
     Terminal,
+    Memory,
     MergeWorktree(String),
     DiscardWorktree(String),
     DefaultModel(String),

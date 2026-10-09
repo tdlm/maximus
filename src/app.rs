@@ -16,6 +16,7 @@ use crate::{
     git::{self, GraphRow},
     hooks::HookMsg,
     keys::{self, KeySet},
+    memory::{self, Usage},
     notify,
     prompt::{Launch, Prompt, PromptAction, Tree},
     session::{self, Session, Status},
@@ -38,6 +39,8 @@ pub enum AppEvent {
     Committed(PathBuf, Result<String, String>),
     /// The shell of the terminal with this id exited.
     ShellExited(u64),
+    /// A memory measurement for the memory modal.
+    Memory(Usage),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +88,8 @@ pub enum Modal {
     Rename(Rename),
     /// Shows the terminal with this id.
     Terminal(u64),
+    /// Memory use of sessions, shells and maximus; None until the first measurement.
+    Memory(Option<Usage>),
 }
 
 pub struct GlobalKeys {
@@ -99,6 +104,7 @@ pub struct GlobalKeys {
     pub graph: KeySet,
     pub commit: KeySet,
     pub terminal: KeySet,
+    pub memory: KeySet,
 }
 
 impl GlobalKeys {
@@ -116,6 +122,7 @@ impl GlobalKeys {
             graph: KeySet::parse(&k.graph),
             commit: KeySet::parse(&k.commit),
             terminal: KeySet::parse(&k.terminal),
+            memory: KeySet::parse(&k.memory),
         }
     }
 }
@@ -297,6 +304,8 @@ pub struct App {
     last_badge: String,
     last_second: Instant,
     last_click: Option<(Instant, u16, u16)>,
+    /// When the memory modal last asked for a measurement.
+    memory_fetched: Option<Instant>,
 }
 
 fn rank(s: &Session) -> u8 {
@@ -379,6 +388,7 @@ impl App {
             last_badge: String::new(),
             last_second: Instant::now(),
             last_click: None,
+            memory_fetched: None,
         };
         app.selected = app.rows().into_iter().next();
         app.scan_folders();
@@ -963,6 +973,11 @@ impl App {
                     self.close_modal();
                 }
             }
+            AppEvent::Memory(u) => {
+                if let Some(Modal::Memory(m)) = &mut self.modal {
+                    *m = Some(u);
+                }
+            }
             AppEvent::Graph(dir, rows) => {
                 let g = &mut self.graph;
                 if g.dir.as_ref() == Some(&dir) {
@@ -1068,6 +1083,7 @@ impl App {
         self.tick = self.tick.wrapping_add(1);
         let mut redraw = self.sessions.iter().any(|s| s.status == Status::Working);
         redraw |= self.refresh_graph();
+        self.refresh_memory();
         if let Some((_, at)) = &self.toast
             && at.elapsed() > Duration::from_secs(4)
         {
@@ -1258,6 +1274,10 @@ impl App {
             ..cmd("Open terminal".into(), Cmd::Terminal)
         });
         items.push(Item {
+            detail: k.memory.short(),
+            ..cmd("Memory usage".into(), Cmd::Memory)
+        });
+        items.push(Item {
             detail: k.settings.short(),
             ..cmd("Settings".into(), Cmd::Settings)
         });
@@ -1432,6 +1452,46 @@ impl App {
         self.modal = Some(Modal::Terminal(id));
     }
 
+    fn open_memory(&mut self) {
+        self.modal = Some(Modal::Memory(None));
+        self.memory_fetched = None;
+        self.refresh_memory();
+    }
+
+    /// While the memory modal is open, measures again every two seconds in the background.
+    fn refresh_memory(&mut self) {
+        if !matches!(self.modal, Some(Modal::Memory(_)))
+            || self
+                .memory_fetched
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+        {
+            return;
+        }
+        self.memory_fetched = Some(Instant::now());
+        let sessions = self
+            .sessions
+            .iter()
+            .filter_map(|s| {
+                let pid = s.pty.as_ref()?.pid?;
+                let name = if s.name.is_empty() {
+                    "session"
+                } else {
+                    &s.name
+                };
+                Some((format!("{} · {name}", self.project_name(&s.project)), pid))
+            })
+            .collect();
+        let shells = self
+            .terminals
+            .iter()
+            .filter_map(|t| Some((tilde(&t.cwd), t.pty.pid?)))
+            .collect();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(AppEvent::Memory(memory::measure(sessions, shells)));
+        });
+    }
+
     /// Sends a key to the open terminal; shift+PgUp/PgDn scroll it back instead.
     fn terminal_key(&mut self, id: u64, k: KeyEvent) {
         let Some(t) = self.terminals.iter_mut().find(|t| t.id == id) else {
@@ -1491,6 +1551,7 @@ impl App {
                 Cmd::Diff => self.open_diff(false),
                 Cmd::Commit => self.open_diff(true),
                 Cmd::Terminal => self.open_terminal(),
+                Cmd::Memory => self.open_memory(),
                 Cmd::Settings => self.modal = Some(Modal::Settings(SettingsModal::new())),
                 Cmd::RemoveProject(p) => self.request_remove_project(p),
                 Cmd::CloseSession(id) => self.request_close_session(id),
@@ -1611,6 +1672,13 @@ impl App {
                         self.terminal_key(id, k);
                     }
                 }
+                Modal::Memory(_) => {
+                    if self.keys.memory.matches(&k)
+                        || matches!(k.code, KeyCode::Esc | KeyCode::Char('q'))
+                    {
+                        self.close_modal();
+                    }
+                }
                 Modal::Rename(r) => match k.code {
                     KeyCode::Enter => {
                         let name = r.input.text.trim().to_string();
@@ -1648,6 +1716,9 @@ impl App {
         }
         if g.terminal.matches(&k) {
             return self.open_terminal();
+        }
+        if g.memory.matches(&k) {
+            return self.open_memory();
         }
         if g.settings.matches(&k) {
             self.modal = Some(Modal::Settings(SettingsModal::new()));

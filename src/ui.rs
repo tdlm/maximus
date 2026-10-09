@@ -8,8 +8,9 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{App, Focus, GraphLine, Modal, RowKey},
+    app::{App, Focus, GlobalKeys, GraphLine, Modal, RowKey},
     config::{ListSort, tilde},
+    memory::{self, Usage},
     session::{Session, Status},
     theme::Theme,
 };
@@ -251,8 +252,95 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             );
             f.set_cursor_position((inner.x + 3 + ccol as u16, inner.y));
         }
+        Some(Modal::Memory(u)) => draw_memory(f, area, u.as_ref(), &app.keys, theme),
         Some(Modal::Terminal(_)) | None => {}
     }
+}
+
+/// The memory modal: each claude session and shell with everything it started, maximus
+/// itself, and the total.
+fn draw_memory(f: &mut Frame, area: Rect, u: Option<&Usage>, keys: &GlobalKeys, t: &Theme) {
+    let muted = Style::default().fg(t.muted);
+    let head = Style::default().fg(t.fg).add_modifier(Modifier::BOLD);
+    // (label, size, style, indented)
+    let mut rows: Vec<(String, String, Style, bool)> = vec![];
+    match u {
+        None => rows.push(("Measuring…".into(), String::new(), muted, false)),
+        Some(u) => {
+            rows.push((
+                format!("Claude sessions ({})", u.sessions.len()),
+                memory::human(u.sessions_total()),
+                head,
+                false,
+            ));
+            for (label, b) in &u.sessions {
+                rows.push((label.clone(), memory::human(*b), muted, true));
+            }
+            rows.push((
+                format!("Shells ({})", u.shells.len()),
+                memory::human(u.shells_total()),
+                head,
+                false,
+            ));
+            for (label, b) in &u.shells {
+                rows.push((label.clone(), memory::human(*b), muted, true));
+            }
+            rows.push(("maximus".into(), memory::human(u.maximus), head, false));
+        }
+    }
+    let total = u.map(|u| memory::human(u.total())).unwrap_or_default();
+
+    let w = (area.width * 6 / 10).clamp(40.min(area.width), 72.min(area.width));
+    // Rows, a rule and the total, inside the border.
+    let h = (rows.len() as u16 + 4).min(area.height);
+    let r = Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, r);
+    let key = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
+    let block = modal_block(" Memory ", t).title_bottom(Line::from(vec![
+        Span::styled(" esc", key),
+        Span::styled(" / ", muted),
+        Span::styled(keys.memory.short(), key),
+        Span::styled(" close ", muted),
+    ]));
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+
+    let width = inner.width as usize;
+    let line = |label: String, size: String, style: Style, indent: bool| {
+        let label = format!("{}{label}", if indent { "   " } else { " " });
+        let size = format!("{size} ");
+        let left = truncate_line(
+            Line::styled(label, style),
+            width.saturating_sub(size.width() + 1),
+        );
+        let pad = width.saturating_sub(left.width() + size.width());
+        let mut spans = left.spans;
+        spans.push(Span::raw(" ".repeat(pad)));
+        spans.push(Span::styled(size, style));
+        Line::from(spans)
+    };
+    let room = inner.height.saturating_sub(2) as usize;
+    let mut lines: Vec<Line> = rows
+        .into_iter()
+        .take(room)
+        .map(|(l, s, st, i)| line(l, s, st, i))
+        .collect();
+    lines.push(Line::styled(
+        "─".repeat(width),
+        Style::default().fg(t.border),
+    ));
+    lines.push(line(
+        "Total".into(),
+        total,
+        Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        false,
+    ));
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Graph panel height for a left column of `column` rows: the saved height (0 = automatic),
@@ -497,6 +585,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
         (k.diff.short(), "View uncommitted changes"),
         (k.commit.short(), "Commit changes"),
         (k.terminal.short(), "Open a terminal in the checkout"),
+        (k.memory.short(), "Memory used by sessions and shells"),
         (k.graph.short(), "Show/hide the commit graph"),
         ("e".into(), "Rename the selected session"),
         ("x".into(), "Close session / remove project"),
