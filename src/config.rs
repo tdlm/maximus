@@ -139,6 +139,7 @@ pub struct Keys {
     pub graph: String,
     pub commit: String,
     pub terminal: String,
+    pub memory: String,
 }
 
 impl Default for Keys {
@@ -155,6 +156,7 @@ impl Default for Keys {
             graph: "ctrl+q".into(),
             commit: "ctrl+k".into(),
             terminal: "ctrl+t".into(),
+            memory: "ctrl+y".into(),
         }
     }
 }
@@ -205,6 +207,26 @@ pub struct SessionRecord {
     pub created: u64,
 }
 
+/// Order of the agent list: attention (needs input first) or by name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListSort {
+    #[default]
+    Attention,
+    NameAsc,
+    NameDesc,
+}
+
+impl ListSort {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Attention => Self::NameAsc,
+            Self::NameAsc => Self::NameDesc,
+            Self::NameDesc => Self::Attention,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct State {
@@ -215,6 +237,7 @@ pub struct State {
     pub graph_open: bool,
     /// Graph panel height in rows; 0 sizes it automatically.
     pub graph_height: u16,
+    pub list_sort: ListSort,
     pub sessions: Vec<SessionRecord>,
 }
 
@@ -227,6 +250,7 @@ impl Default for State {
             diff_split: true,
             graph_open: true,
             graph_height: 0,
+            list_sort: ListSort::Attention,
             sessions: vec![],
         }
     }

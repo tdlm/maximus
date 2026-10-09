@@ -37,7 +37,9 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 ```
 
 - Left: sessions grouped by project; needs-input sorts to the top of each group (and projects with
-  needs-input sort up). Project rows show status counts.
+  needs-input sort up). Project rows show status counts. `s` cycles the order to projects and
+  sessions by name A→Z, then Z→A (natural order, case-insensitive), then back; the panel title
+  shows a name sort and it persists.
 - Right: the focused session's live terminal.
 - Separator is mouse-draggable; widths persist.
 

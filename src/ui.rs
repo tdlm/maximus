@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{App, Focus, GraphLine, Modal, RowKey},
-    config::tilde,
+    config::{ListSort, tilde},
     session::{Session, Status},
     theme::Theme,
 };
@@ -269,7 +269,12 @@ pub fn graph_height(saved: u16, column: u16) -> u16 {
 fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
     let focused = app.focus == Focus::List && app.modal.is_none();
-    let block = panel(" Agents ", focused, t);
+    let title = match app.state.list_sort {
+        ListSort::Attention => " Agents ",
+        ListSort::NameAsc => " Agents · A→Z ",
+        ListSort::NameDesc => " Agents · Z→A ",
+    };
+    let block = panel(title, focused, t);
     let inner = block.inner(area);
     f.render_widget(block, area);
     let rows = app.rows();
@@ -348,12 +353,7 @@ fn draw_list(f: &mut Frame, app: &mut App, area: Rect) {
                 } else {
                     base.fg(t.fg)
                 };
-                let name = if s.name.is_empty() {
-                    "new session".to_string()
-                } else {
-                    s.name.clone()
-                };
-                spans.push(Span::styled(name, name_style));
+                spans.push(Span::styled(s.label().to_string(), name_style));
                 let mut r = Vec::new();
                 if s.cwd != s.project {
                     r.push(Span::styled(" ⎇", base.fg(t.green)));

@@ -34,6 +34,8 @@ pub struct Pty {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
     pub size: (u16, u16),
+    /// The child's process id, for measuring its memory.
+    pub pid: Option<u32>,
 }
 
 pub struct Session {
@@ -78,6 +80,15 @@ pub fn now_secs() -> u64 {
 }
 
 impl Session {
+    /// The name shown in the agent list.
+    pub fn label(&self) -> &str {
+        if self.name.is_empty() {
+            "new session"
+        } else {
+            &self.name
+        }
+    }
+
     pub fn new(
         project: PathBuf,
         cwd: PathBuf,
@@ -282,6 +293,7 @@ impl Pty {
             .with_context(|| format!("spawning {program}"))?;
         drop(pair.slave);
         let killer = child.clone_killer();
+        let pid = child.process_id();
         let mut reader = pair.master.try_clone_reader()?;
         let writer: Arc<Mutex<Box<dyn Write + Send>>> =
             Arc::new(Mutex::new(pair.master.take_writer()?));
@@ -325,6 +337,7 @@ impl Pty {
             writer,
             killer,
             size: (rows, cols),
+            pid,
         })
     }
 

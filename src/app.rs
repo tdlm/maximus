@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -10,7 +11,7 @@ use crossterm::event::{
 use ratatui::layout::Rect;
 
 use crate::{
-    config::{Config, ProjectEntry, State, expand, tilde},
+    config::{Config, ListSort, ProjectEntry, State, expand, tilde},
     diff::{DiffAction, DiffView, FilePreview},
     git::{self, GraphRow},
     hooks::HookMsg,
@@ -308,6 +309,39 @@ fn rank(s: &Session) -> u8 {
     }
 }
 
+/// Case-insensitive comparison that orders runs of digits by value, so `agent 2` < `agent 10`.
+fn natural_cmp(a: &str, b: &str) -> Ordering {
+    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (a.peek(), b.peek()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let num = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut d = String::new();
+                    while let Some(c) = it.next_if(char::is_ascii_digit) {
+                        d.push(c);
+                    }
+                    d.trim_start_matches('0').to_string()
+                };
+                let (x, y) = (num(&mut a), num(&mut b));
+                let o = x.len().cmp(&y.len()).then_with(|| x.cmp(&y));
+                if o.is_ne() {
+                    return o;
+                }
+            }
+            (Some(_), Some(_)) => {
+                let (x, y) = (a.next().unwrap(), b.next().unwrap());
+                let o = x.to_lowercase().cmp(y.to_lowercase());
+                if o.is_ne() {
+                    return o;
+                }
+            }
+        }
+    }
+}
+
 impl App {
     pub fn new(tx: Sender<AppEvent>, hook_settings: PathBuf, sock: PathBuf) -> Self {
         let cfg = Config::load();
@@ -380,24 +414,38 @@ impl App {
             .iter()
             .filter(|s| s.project == path && !s.archived)
             .collect();
-        v.sort_by(|a, b| rank(a).cmp(&rank(b)).then(b.created.cmp(&a.created)));
+        match self.state.list_sort {
+            ListSort::Attention => {
+                v.sort_by(|a, b| rank(a).cmp(&rank(b)).then(b.created.cmp(&a.created)))
+            }
+            ListSort::NameAsc => v.sort_by(|a, b| natural_cmp(a.label(), b.label())),
+            ListSort::NameDesc => v.sort_by(|a, b| natural_cmp(b.label(), a.label())),
+        }
         v
     }
 
     /// Rows of the agent list, in display order.
     pub fn rows(&self) -> Vec<RowKey> {
         let mut projects: Vec<&ProjectEntry> = self.state.projects.iter().collect();
-        projects.sort_by_key(|p| {
-            if self
-                .sessions
-                .iter()
-                .any(|s| s.project == p.path && !s.archived && s.status == Status::NeedsInput)
-            {
-                0
-            } else {
-                1
+        match self.state.list_sort {
+            ListSort::Attention => {
+                projects.sort_by_key(|p| {
+                    if self.sessions.iter().any(|s| {
+                        s.project == p.path && !s.archived && s.status == Status::NeedsInput
+                    }) {
+                        0
+                    } else {
+                        1
+                    }
+                })
             }
-        });
+            ListSort::NameAsc => projects.sort_by(|a, b| {
+                natural_cmp(&self.project_name(&a.path), &self.project_name(&b.path))
+            }),
+            ListSort::NameDesc => projects.sort_by(|a, b| {
+                natural_cmp(&self.project_name(&b.path), &self.project_name(&a.path))
+            }),
+        }
         let mut rows = Vec::new();
         for p in projects {
             rows.push(RowKey::Project(p.path.clone()));
@@ -478,6 +526,16 @@ impl App {
             "Graph shown"
         } else {
             "Graph hidden"
+        });
+    }
+
+    fn cycle_sort(&mut self) {
+        self.state.list_sort = self.state.list_sort.next();
+        let _ = self.state.save();
+        self.toast(match self.state.list_sort {
+            ListSort::Attention => "Sorted by attention",
+            ListSort::NameAsc => "Sorted by name A→Z",
+            ListSort::NameDesc => "Sorted by name Z→A",
         });
     }
 
@@ -1804,6 +1862,7 @@ impl App {
             }
             KeyCode::Char('d') => self.open_diff(false),
             KeyCode::Char('t') => self.toggle_graph(),
+            KeyCode::Char('s') => self.cycle_sort(),
             KeyCode::Char('/') => self.open_switcher(),
             KeyCode::Char(',') => self.modal = Some(Modal::Settings(SettingsModal::new())),
             KeyCode::Char('q') => self.request_quit(),
@@ -2081,5 +2140,21 @@ impl App {
             notify::copy(&text);
             self.toast(format!("Copied {} chars", text.chars().count()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::natural_cmp;
+    use std::cmp::Ordering::*;
+
+    #[test]
+    fn natural_order() {
+        assert_eq!(natural_cmp("agent 2", "agent 10"), Less);
+        assert_eq!(natural_cmp("Beta", "alpha"), Greater);
+        assert_eq!(natural_cmp("api", "API"), Equal);
+        assert_eq!(natural_cmp("v007", "v7"), Equal);
+        assert_eq!(natural_cmp("fix", "fix keys"), Less);
+        assert_eq!(natural_cmp("a1b", "a1a"), Greater);
     }
 }

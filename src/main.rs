@@ -4,6 +4,7 @@ mod diff;
 mod git;
 mod hooks;
 mod keys;
+mod memory;
 mod notify;
 mod prompt;
 mod session;
