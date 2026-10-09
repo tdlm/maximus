@@ -365,6 +365,11 @@ impl Pty {
     pub fn kill(&mut self) {
         let _ = self.killer.kill();
     }
+
+    /// The process group in the foreground of the pty, i.e. whatever is running in it.
+    pub fn foreground_pid(&self) -> Option<i32> {
+        self.master.process_group_leader()
+    }
 }
 
 /// Wraps pasted text the way a terminal would: newlines as carriage returns, inside

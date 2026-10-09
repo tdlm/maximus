@@ -985,10 +985,19 @@ impl App {
             AppEvent::Folders(f) => self.folders = f,
             AppEvent::Committed(root, res) => self.commit_finished(root, res),
             AppEvent::ShellExited(id) => {
-                self.terminals.retain(|t| t.id != id);
                 if matches!(self.modal, Some(Modal::Terminal(m)) if m == id) {
-                    self.close_modal();
+                    // Fall back to the next tab over, or close once the last one is gone.
+                    let tabs = self.terminal_tabs(id);
+                    let i = tabs.iter().position(|&t| t == id).unwrap_or(0);
+                    match tabs
+                        .get(i + 1)
+                        .or(i.checked_sub(1).and_then(|j| tabs.get(j)))
+                    {
+                        Some(&next) => self.show_terminal(next),
+                        None => self.close_modal(),
+                    }
                 }
+                self.terminals.retain(|t| t.id != id);
             }
             AppEvent::Memory(u) => {
                 if let Some(Modal::Memory(m)) = &mut self.modal {
@@ -1485,29 +1494,65 @@ impl App {
         self.modal = Some(Modal::Rename(Rename { id, input }));
     }
 
-    /// Shows the shell for the current checkout, starting one if it has none.
+    /// Shows the shell last used in the current checkout, starting one if it has none.
     fn open_terminal(&mut self) {
         let Some(dir) = self.checkout_dir() else {
             self.toast("Add a project first");
             return;
         };
-        let id = match self.terminals.iter().find(|t| t.cwd == dir) {
-            Some(t) => t.id,
-            None => {
-                self.next_terminal += 1;
-                let id = self.next_terminal;
-                let (w, h) = crossterm::terminal::size().unwrap_or((120, 40));
-                let r = ui::terminal_rect(Rect::new(0, 0, w, h));
-                let size = (r.height.saturating_sub(2), r.width.saturating_sub(2));
-                let colors = (Theme::rgb_of(self.theme.bg), Theme::rgb_of(self.theme.fg));
-                match Terminal::spawn(id, dir, size, colors, self.tx.clone()) {
-                    Ok(t) => self.terminals.push(t),
-                    Err(e) => return self.toast(format!("Failed to start a shell: {e:#}")),
-                }
-                id
-            }
-        };
+        match self
+            .terminals
+            .iter()
+            .filter(|t| t.cwd == dir)
+            .max_by_key(|t| t.shown)
+        {
+            Some(t) => self.show_terminal(t.id),
+            None => self.new_terminal(dir),
+        }
+    }
+
+    /// Starts another shell in `dir` and shows it.
+    fn new_terminal(&mut self, dir: PathBuf) {
+        self.next_terminal += 1;
+        let id = self.next_terminal;
+        let (w, h) = crossterm::terminal::size().unwrap_or((120, 40));
+        let r = ui::terminal_rect(Rect::new(0, 0, w, h));
+        let size = (r.height.saturating_sub(2), r.width.saturating_sub(2));
+        let colors = (Theme::rgb_of(self.theme.bg), Theme::rgb_of(self.theme.fg));
+        match Terminal::spawn(id, dir, size, colors, self.tx.clone()) {
+            Ok(t) => self.terminals.push(t),
+            Err(e) => return self.toast(format!("Failed to start a shell: {e:#}")),
+        }
+        self.show_terminal(id);
+    }
+
+    fn show_terminal(&mut self, id: u64) {
+        if let Some(t) = self.terminals.iter_mut().find(|t| t.id == id) {
+            t.shown = Instant::now();
+        }
         self.modal = Some(Modal::Terminal(id));
+    }
+
+    /// The shells in the same checkout as shell `id`, in the order they were started: the
+    /// overlay's tabs.
+    pub fn terminal_tabs(&self, id: u64) -> Vec<u64> {
+        let Some(cwd) = self.terminals.iter().find(|t| t.id == id).map(|t| &t.cwd) else {
+            return vec![];
+        };
+        self.terminals
+            .iter()
+            .filter(|t| &t.cwd == cwd)
+            .map(|t| t.id)
+            .collect()
+    }
+
+    /// Moves from tab `id` to the one `delta` tabs over, wrapping around.
+    fn cycle_terminal(&mut self, id: u64, delta: isize) {
+        let tabs = self.terminal_tabs(id);
+        if let Some(i) = tabs.iter().position(|&t| t == id) {
+            let n = tabs.len() as isize;
+            self.show_terminal(tabs[(i as isize + delta).rem_euclid(n) as usize]);
+        }
     }
 
     fn open_help(&mut self) {
@@ -1559,7 +1604,7 @@ impl App {
         let shells = self
             .terminals
             .iter()
-            .filter_map(|t| Some((tilde(&t.cwd), t.pty.pid?)))
+            .filter_map(|t| Some((format!("{} · {}", tilde(&t.cwd), t.label()), t.pty.pid?)))
             .collect();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -1744,8 +1789,24 @@ impl App {
                 },
                 Modal::Terminal(id) => {
                     let id = *id;
+                    let alt = k.modifiers == KeyModifiers::ALT;
                     if self.keys.terminal.matches(&k) {
                         self.close_modal();
+                    } else if alt && k.code == KeyCode::Char('t') {
+                        if let Some(dir) = self.terminals.iter().find(|t| t.id == id) {
+                            self.new_terminal(dir.cwd.clone());
+                        }
+                    } else if self.keys.next_session.matches(&k) {
+                        self.cycle_terminal(id, 1);
+                    } else if self.keys.prev_session.matches(&k) {
+                        self.cycle_terminal(id, -1);
+                    } else if let KeyCode::Char(c @ '1'..='9') = k.code
+                        && alt
+                    {
+                        let n = c as usize - '1' as usize;
+                        if let Some(&tab) = self.terminal_tabs(id).get(n) {
+                            self.show_terminal(tab);
+                        }
                     } else {
                         self.terminal_key(id, k);
                     }

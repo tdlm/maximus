@@ -1,6 +1,7 @@
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use anyhow::Result;
@@ -14,7 +15,7 @@ use crate::{
 
 /// A login shell started in a checkout. It outlives the overlay showing it, so hiding the
 /// terminal leaves whatever runs in it (a dev server, a watcher) going; it's gone once the
-/// shell exits.
+/// shell exits. A checkout can have several, shown as tabs.
 pub struct Terminal {
     pub id: u64,
     pub cwd: PathBuf,
@@ -22,6 +23,8 @@ pub struct Terminal {
     pub pty: Pty,
     /// Lines scrolled back from the bottom (0 = live).
     pub scroll: usize,
+    /// When the overlay last showed it, so ctrl+t brings back the last one used.
+    pub shown: Instant,
 }
 
 impl Terminal {
@@ -52,6 +55,7 @@ impl Terminal {
             parser,
             pty,
             scroll: 0,
+            shown: Instant::now(),
         })
     }
 
@@ -59,4 +63,26 @@ impl Terminal {
         self.scroll = 0;
         self.pty.write(bytes);
     }
+
+    /// Its tab's name: what's running in the foreground (`zsh`, `node`, `vim`, ...).
+    pub fn label(&self) -> String {
+        self.pty
+            .foreground_pid()
+            .and_then(process_name)
+            .unwrap_or_else(|| "shell".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn process_name(pid: i32) -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: proc_name writes at most `buf.len()` bytes into `buf`.
+    let n = unsafe { libc::proc_name(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    (n > 0).then(|| String::from_utf8_lossy(&buf[..n as usize]).into_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_name(pid: i32) -> Option<String> {
+    let s = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(s.trim_end().to_string()).filter(|s| !s.is_empty())
 }

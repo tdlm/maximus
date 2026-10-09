@@ -811,7 +811,30 @@ pub fn terminal_rect(area: Rect) -> Rect {
 
 fn draw_terminal(f: &mut Frame, app: &mut App, area: Rect, id: u64) {
     let t = app.theme;
-    let hide = app.keys.terminal.short();
+    let k = &app.keys;
+    let (hide, prev, next) = (
+        k.terminal.short(),
+        k.prev_session.short(),
+        k.next_session.short(),
+    );
+    let tabs = app.terminal_tabs(id);
+    let tab_spans: Vec<Span> = tabs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &tid)| {
+            let label = app.terminals.iter().find(|x| x.id == tid)?.label();
+            let label: String = label.chars().take(16).collect();
+            let style = if tid == id {
+                Style::default()
+                    .bg(t.accent)
+                    .fg(t.bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t.muted)
+            };
+            Some(Span::styled(format!(" {} {label} ", i + 1), style))
+        })
+        .collect();
     let Some(term) = app.terminals.iter_mut().find(|x| x.id == id) else {
         return;
     };
@@ -825,11 +848,16 @@ fn draw_terminal(f: &mut Frame, app: &mut App, area: Rect, id: u64) {
     };
     let txt = |s: &str| Span::styled(s.to_string(), Style::default().fg(t.muted));
     let block = modal_block(&format!(" Terminal · {} ", tilde(&term.cwd)), t)
+        .title(Line::from(tab_spans))
         .style(Style::default().bg(t.bg).fg(t.fg))
         .title_bottom(Line::from(vec![
             txt(" "),
             key(hide),
             txt(" hide · "),
+            key("⌥t".into()),
+            txt(" new · "),
+            key(format!("{prev} {next}")),
+            txt(" switch · "),
             key("exit".into()),
             txt(" close "),
         ]));

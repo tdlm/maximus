@@ -121,7 +121,13 @@ fn sections(k: &GlobalKeys) -> Vec<Section> {
         (
             "Terminal",
             vec![
-                (k.terminal.short(), "Hide, leaving the shell running"),
+                (k.terminal.short(), "Hide, leaving the shells running"),
+                ("⌥t".into(), "Another shell in the same checkout"),
+                (
+                    format!("{} {}", k.prev_session.short(), k.next_session.short()),
+                    "Previous/next shell",
+                ),
+                ("⌥1-9".into(), "Go to shell 1-9"),
                 ("^d".into(), "End the shell"),
                 ("⇧PgUp PgDn".into(), "Scroll back (or the mouse wheel)"),
             ],
