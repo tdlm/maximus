@@ -11,6 +11,7 @@ use crate::{
     app::{App, Focus, GlobalKeys, GraphLine, Modal, RowKey},
     config::{ListSort, tilde},
     memory::{self, Usage},
+    overview,
     session::{Session, Status},
     theme::Theme,
 };
@@ -105,7 +106,7 @@ pub fn status_word(s: &Session) -> &'static str {
     }
 }
 
-fn age(secs: u64) -> String {
+pub fn age(secs: u64) -> String {
     let d = crate::session::now_secs().saturating_sub(secs);
     match d {
         0..60 => "now".into(),
@@ -175,6 +176,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_terminal(f, app, area, id);
     }
     let theme = app.theme;
+    let tiles = matches!(app.modal, Some(Modal::Overview(_))).then(|| overview::tiles(app));
     match &mut app.modal {
         Some(Modal::Switcher(s)) => s.draw(f, area, theme),
         Some(Modal::Prompt(p)) => p.draw(f, area, theme),
@@ -253,6 +255,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             f.set_cursor_position((inner.x + 3 + ccol as u16, inner.y));
         }
         Some(Modal::NewProject(np)) => np.draw(f, area, theme),
+        Some(Modal::Overview(o)) => o.draw(
+            f,
+            area,
+            tiles.as_deref().unwrap_or_default(),
+            &app.keys.overview.short(),
+            theme,
+        ),
         Some(Modal::Memory(u)) => draw_memory(f, area, u.as_ref(), &app.keys, theme),
         Some(Modal::Terminal(_)) | None => {}
     }
@@ -587,6 +596,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
         (k.diff.short(), "View uncommitted changes"),
         (k.commit.short(), "Commit changes"),
         (k.terminal.short(), "Open a terminal in the checkout"),
+        (k.overview.short(), "Overview of every agent"),
         (k.memory.short(), "Memory used by sessions and shells"),
         (k.graph.short(), "Show/hide the commit graph"),
         ("e".into(), "Rename the selected session"),

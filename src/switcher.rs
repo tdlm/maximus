@@ -27,6 +27,7 @@ pub enum Cmd {
     Commit,
     Terminal,
     Memory,
+    Overview,
     MergeWorktree(String),
     DiscardWorktree(String),
     DefaultModel(String),

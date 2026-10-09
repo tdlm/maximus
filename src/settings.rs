@@ -62,6 +62,7 @@ const KEY_NAMES: &[&str] = &[
     "Commit changes",
     "Terminal",
     "Memory usage",
+    "Agent overview",
 ];
 
 fn key_slot(cfg: &mut Config, i: usize) -> &mut String {
@@ -78,7 +79,8 @@ fn key_slot(cfg: &mut Config, i: usize) -> &mut String {
         8 => &mut k.graph,
         9 => &mut k.commit,
         10 => &mut k.terminal,
-        _ => &mut k.memory,
+        11 => &mut k.memory,
+        _ => &mut k.overview,
     }
 }
 

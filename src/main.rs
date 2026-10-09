@@ -8,6 +8,7 @@ mod keys;
 mod memory;
 mod newproject;
 mod notify;
+mod overview;
 mod prompt;
 mod session;
 mod settings;

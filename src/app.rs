@@ -19,6 +19,7 @@ use crate::{
     memory::{self, Usage},
     newproject::{NewProject, NewProjectAction},
     notify,
+    overview::{Overview, OverviewAction},
     prompt::{Launch, Prompt, PromptAction, Tree},
     session::{self, Session, Status},
     settings::{SettingsAction, SettingsModal},
@@ -92,6 +93,8 @@ pub enum Modal {
     Terminal(u64),
     /// Memory use of sessions, shells and maximus; None until the first measurement.
     Memory(Option<Usage>),
+    /// Every agent as a tile.
+    Overview(Overview),
 }
 
 pub struct GlobalKeys {
@@ -107,6 +110,7 @@ pub struct GlobalKeys {
     pub commit: KeySet,
     pub terminal: KeySet,
     pub memory: KeySet,
+    pub overview: KeySet,
 }
 
 impl GlobalKeys {
@@ -125,6 +129,7 @@ impl GlobalKeys {
             commit: KeySet::parse(&k.commit),
             terminal: KeySet::parse(&k.terminal),
             memory: KeySet::parse(&k.memory),
+            overview: KeySet::parse(&k.overview),
         }
     }
 }
@@ -469,7 +474,7 @@ impl App {
     }
 
     /// All visible sessions in attention order.
-    fn attention_order(&self) -> Vec<String> {
+    pub fn attention_order(&self) -> Vec<String> {
         let mut v: Vec<&Session> = self.sessions.iter().filter(|s| !s.archived).collect();
         v.sort_by(|a, b| rank(a).cmp(&rank(b)).then(b.created.cmp(&a.created)));
         v.into_iter().map(|s| s.id.clone()).collect()
@@ -1284,6 +1289,10 @@ impl App {
             ..cmd("Open terminal".into(), Cmd::Terminal)
         });
         items.push(Item {
+            detail: k.overview.short(),
+            ..cmd("Agent overview".into(), Cmd::Overview)
+        });
+        items.push(Item {
             detail: k.memory.short(),
             ..cmd("Memory usage".into(), Cmd::Memory)
         });
@@ -1487,6 +1496,19 @@ impl App {
         self.modal = Some(Modal::Terminal(id));
     }
 
+    fn open_overview(&mut self) {
+        self.modal = Some(Modal::Overview(Overview::default()));
+    }
+
+    /// Opens a session picked in the overview, resuming it if it was stopped.
+    fn open_from_overview(&mut self, id: &str) {
+        self.modal = None;
+        if self.session(id).is_some_and(|s| s.pty.is_none()) {
+            self.resume(id);
+        }
+        self.focus_session(id);
+    }
+
     fn open_memory(&mut self) {
         self.modal = Some(Modal::Memory(None));
         self.memory_fetched = None;
@@ -1588,6 +1610,7 @@ impl App {
                 Cmd::Commit => self.open_diff(true),
                 Cmd::Terminal => self.open_terminal(),
                 Cmd::Memory => self.open_memory(),
+                Cmd::Overview => self.open_overview(),
                 Cmd::Settings => self.modal = Some(Modal::Settings(SettingsModal::new())),
                 Cmd::RemoveProject(p) => self.request_remove_project(p),
                 Cmd::CloseSession(id) => self.request_close_session(id),
@@ -1715,6 +1738,17 @@ impl App {
                         self.close_modal();
                     }
                 }
+                Modal::Overview(o) => {
+                    if self.keys.overview.matches(&k) {
+                        self.close_modal();
+                    } else {
+                        match o.handle_key(k) {
+                            OverviewAction::None => {}
+                            OverviewAction::Close => self.close_modal(),
+                            OverviewAction::Open(id) => self.open_from_overview(&id),
+                        }
+                    }
+                }
                 Modal::NewProject(np) => match np.handle_key(k) {
                     NewProjectAction::None => {}
                     NewProjectAction::Close => {
@@ -1768,6 +1802,9 @@ impl App {
         }
         if g.memory.matches(&k) {
             return self.open_memory();
+        }
+        if g.overview.matches(&k) {
+            return self.open_overview();
         }
         if g.settings.matches(&k) {
             self.modal = Some(Modal::Settings(SettingsModal::new()));
@@ -1948,6 +1985,7 @@ impl App {
             KeyCode::Char('n') => self.open_prompt(false),
             KeyCode::Char('w') => self.open_prompt(true),
             KeyCode::Char('N') => self.open_new_project(""),
+            KeyCode::Char('o') => self.open_overview(),
             KeyCode::Char('r') => {
                 if let Some(RowKey::Session(id)) = self.selected.clone() {
                     self.resume(&id);
@@ -2010,6 +2048,11 @@ impl App {
                 Modal::Switcher(s) => {
                     if let Some(a) = s.handle_mouse(m) {
                         self.run_action(a);
+                    }
+                }
+                Modal::Overview(o) => {
+                    if let OverviewAction::Open(id) = o.handle_mouse(m) {
+                        self.open_from_overview(&id);
                     }
                 }
                 Modal::Settings(s) => {

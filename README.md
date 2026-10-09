@@ -91,13 +91,14 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+k`   | Commit the current session's changes     |
 | `ctrl+t`   | Terminal in the current session's checkout (again to hide) |
 | `ctrl+y`   | Memory used by claude sessions, shells and maximus |
+| `ctrl+n`   | Overview of every agent as tiles         |
 | `ctrl+s`   | Settings                                 |
 | `alt+↓/↑`  | Next/previous session in attention order (needs input → working → unseen); in the left column, move between Agents and Graph |
 | `alt+←/→`  | Focus agent list / pane                  |
 | `ctrl+q`   | Show/hide the commit graph               |
 
 Agent list: `j/k` move · `enter` open (resumes stopped) · `n` new prompt · `w` new prompt in a new
-worktree · `N` new project · `r` resume · `e` rename session · `x` close session / remove project · `m` merge worktree · `d` diff · `t` graph · `s` sort (attention → name A→Z → Z→A) · `/` switcher · `,` settings · `q` quit.
+worktree · `N` new project · `o` overview · `r` resume · `e` rename session · `x` close session / remove project · `m` merge worktree · `d` diff · `t` graph · `s` sort (attention → name A→Z → Z→A) · `/` switcher · `,` settings · `q` quit.
 
 Graph (commits on the current session's checkout): the selected commit expands to show its changed
 files · `j/k` move through commits and files · a selected file's diff shows on the right
@@ -145,6 +146,12 @@ Memory (`ctrl+y`): resident memory of each running claude session, each terminal
 maximus itself, with the total. A session or shell counts everything it started (tools, MCP
 servers, a dev server), so the total is what maximus is responsible for. It refreshes every two
 seconds while open; `esc` or `ctrl+y` closes it.
+
+Overview (`ctrl+n`, or `o` in the agent list): every agent in the Agents list as a tile — name,
+project and worktree branch, status (needs input, working, done, idle or stopped) and age — in
+attention order, so whatever needs you comes first; tiles needing input get a red border, unseen
+finished ones a blue one. A line at the top counts each status. Arrows or `hjkl` move, `enter` or a
+click opens the session (resuming it if stopped), `esc` or `ctrl+n` closes.
 
 Mouse: click to select/focus, drag the pane separators, scroll lists, panes and diffs.
 

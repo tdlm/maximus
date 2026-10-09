@@ -143,6 +143,7 @@ pub struct Keys {
     pub commit: String,
     pub terminal: String,
     pub memory: String,
+    pub overview: String,
 }
 
 impl Default for Keys {
@@ -160,6 +161,7 @@ impl Default for Keys {
             commit: "ctrl+k".into(),
             terminal: "ctrl+t".into(),
             memory: "ctrl+y".into(),
+            overview: "ctrl+n".into(),
         }
     }
 }

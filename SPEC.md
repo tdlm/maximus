@@ -55,12 +55,14 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 | ctrl+k   | Commit the focused session's changes      |
 | ctrl+t   | Terminal in the focused session's tree    |
 | ctrl+y   | Memory usage                              |
+| ctrl+n   | Agent overview                            |
 | ctrl+s   | Settings                                  |
 | alt+↑/↓  | Prev/next session (attention order)       |
 | alt+←/→  | Focus agent list / pane                   |
 
 All rebindable in settings. Note: these keys are then unavailable to claude itself
-(e.g. ctrl+p history-prev, ctrl+j newline, ctrl+k kill-line, ctrl+t task list, ctrl+y yank).
+(e.g. ctrl+p history-prev, ctrl+j newline, ctrl+k kill-line, ctrl+t task list, ctrl+y yank,
+ctrl+n history-next).
 
 ## Switcher (ctrl+p)
 
@@ -146,6 +148,14 @@ A small centered modal listing resident memory (RSS from `ps`) for each live cla
 each terminal shell — each counted with its whole process tree, so tools, MCP servers and dev
 servers land on whatever started them — then maximus itself and the total. Refreshes every two
 seconds while open. RSS counts shared pages once per process, so totals run a little high.
+
+## Overview (ctrl+n)
+
+A quick-look alternative to the Agents panel (also `o` in the agent list): a centered grid with a
+tile per visible session, in attention order. Each tile shows the status dot and name, the project
+(and worktree branch), the status word and age; needs-input tiles get a red border and unseen
+finished ones blue. A summary line counts each status. Arrows/`hjkl` move, enter or a click opens
+the session (resuming a stopped one), esc closes. Rows scroll when there are more tiles than fit.
 
 ## Settings (ctrl+s)
 
