@@ -100,7 +100,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+q`   | Show/hide the commit graph               |
 
 Agent list: `j/k` move · `enter` open (resumes stopped) · `n` new prompt · `w` new prompt in a new
-worktree · `N` new project · `o` overview · `?` keyboard shortcuts · `r` resume · `e` rename session · `x` close session / remove project · `m` merge worktree · `d` diff · `t` graph · `s` sort (attention → name A→Z → Z→A) · `/` switcher · `,` settings · `q` quit.
+worktree · `N` new project · `o` overview · `?` keyboard shortcuts · `r` resume · `e` rename session · `x` close session / remove project · `m` merge worktree · `W` clean up unused worktrees · `d` diff · `t` graph · `s` sort (attention → name A→Z → Z→A) · `/` switcher · `,` settings · `q` quit.
 
 Graph (commits on the current session's checkout): the selected commit expands to show its changed
 files · `j/k` move through commits and files · a selected file's diff shows on the right
@@ -111,7 +111,8 @@ Finishing a worktree: `m` on a session in a worktree merges its branch into the 
 checkout is on, stops the worktree's sessions, and deletes the worktree and branch. It refuses if
 the worktree has uncommitted changes and aborts the merge on conflicts, leaving everything as it
 was. The switcher also has **Discard worktree**, which deletes the worktree and branch without
-merging.
+merging. `W` cleans up every worktree with no running session or shell, in all projects: after a
+confirm listing them, it deletes each worktree and its branch, merged or not.
 
 Pane: everything goes to claude. `shift+PgUp/PgDn` or the mouse wheel scrolls back; drag to select
 and copy.
