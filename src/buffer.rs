@@ -65,6 +65,178 @@ pub fn col_at(line: &str, target: usize) -> usize {
     line.len()
 }
 
+/// Characters a wrapped line may break after or before, as VS Code's defaults.
+const BREAK_AFTER: &str = " \t})]?|/&.,;¢°′″‰℃、。｡､￠，．：；？！％・･ゝゞヽヾーァィゥェォッャュョヮヵヶぁぃぅぇぉっゃゅょゎゕゖㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ々〻ｧｨｩｪｫｬｭｮｯｰ”〉》」』】〕）］｝｣";
+const BREAK_BEFORE: &str = "([{‘“〈《「『【〔（［｛｢£¥＄￡￥+＋";
+
+#[derive(Clone, Copy, PartialEq)]
+enum Class {
+    None,
+    After,
+    Before,
+    /// Wide characters (CJK), which break anywhere.
+    Wide,
+}
+
+fn class(ch: char) -> Class {
+    if BREAK_AFTER.contains(ch) {
+        Class::After
+    } else if BREAK_BEFORE.contains(ch) {
+        Class::Before
+    } else if ch.width() == Some(2) {
+        Class::Wide
+    } else {
+        Class::None
+    }
+}
+
+/// Whether a wrapped line may break between `prev` and `ch`: never before whitespace, which
+/// hangs off the end of the row instead, else as VS Code decides.
+fn can_break(prev: Class, ch: char, cls: Class) -> bool {
+    !ch.is_whitespace()
+        && ((prev == Class::After && cls != Class::After)
+            || (prev != Class::Before && cls == Class::Before)
+            || (prev == Class::Wide && cls != Class::After)
+            || (cls == Class::Wide && prev != Class::Before))
+}
+
+/// A line laid out in rows of a given width.
+#[derive(Debug, PartialEq)]
+pub struct Wrap {
+    /// The byte offset each row starts at; the first is 0.
+    pub starts: Vec<usize>,
+    /// Columns rows after the first are indented by: the line's own indentation.
+    pub indent: usize,
+}
+
+impl Wrap {
+    pub fn rows(&self) -> usize {
+        self.starts.len()
+    }
+
+    /// The row byte offset `col` is drawn on.
+    pub fn row_of(&self, col: usize) -> usize {
+        self.starts.partition_point(|&s| s <= col) - 1
+    }
+
+    /// Where row `r` starts and ends in `line`.
+    pub fn span(&self, line: &str, r: usize) -> (usize, usize) {
+        (
+            self.starts[r],
+            self.starts.get(r + 1).copied().unwrap_or(line.len()),
+        )
+    }
+
+    /// Screen column of byte offset `col`, counted from the text's left edge.
+    pub fn x_of(&self, line: &str, col: usize) -> usize {
+        let r = self.row_of(col);
+        let indent = if r > 0 { self.indent } else { 0 };
+        indent + display_col(line, col) - display_col(line, self.starts[r])
+    }
+
+    /// Byte offset at screen column `x` on row `r`. Rows but the last stop before their final
+    /// character, since their end is where the next row starts.
+    pub fn col_at(&self, line: &str, r: usize, x: usize) -> usize {
+        let (start, end) = self.span(line, r);
+        let indent = if r > 0 { self.indent } else { 0 };
+        let target = display_col(line, start).saturating_add(x.saturating_sub(indent));
+        let col = col_at(line, target).clamp(start, end);
+        if r + 1 < self.rows() && col == end {
+            line[..end]
+                .char_indices()
+                .next_back()
+                .map_or(start, |(i, _)| i)
+        } else {
+            col
+        }
+    }
+}
+
+/// Lays out `line` in rows `width` columns wide, breaking between words where it can and
+/// indenting the rows after the first as the line is, like VS Code. 0 doesn't wrap.
+pub fn wrap(line: &str, width: usize) -> Wrap {
+    let single = Wrap {
+        starts: vec![0],
+        indent: 0,
+    };
+    if width == 0 || display_col(line, line.len()) <= width {
+        return single;
+    }
+    // Each character's byte offset, column, width and class.
+    let mut chars = Vec::with_capacity(line.len());
+    let mut col = 0;
+    for (i, ch) in line.char_indices() {
+        let w = char_width(ch, col);
+        chars.push((i, col, w, ch, class(ch)));
+        col += w;
+    }
+    let lead = chars
+        .iter()
+        .find(|c| !c.3.is_whitespace())
+        .map_or(0, |c| c.1);
+    // Deep indentation would leave too little room, so it's dropped.
+    let indent = if lead <= width / 2 { lead } else { 0 };
+    let mut starts = vec![0];
+    let (mut row, mut row_col, mut room) = (0, 0, width);
+    let mut brk = None;
+    let mut i = 0;
+    while i < chars.len() {
+        let (_, col, w, ch, cls) = chars[i];
+        if i > row && can_break(chars[i - 1].4, ch, cls) {
+            brk = Some(i);
+        }
+        if i > row && !ch.is_whitespace() && col + w - row_col > room {
+            // Back to the last break, or mid-word if the row has none.
+            i = brk.take().unwrap_or(i);
+            starts.push(chars[i].0);
+            row = i;
+            row_col = chars[i].1;
+            room = width - indent;
+            continue;
+        }
+        i += 1;
+    }
+    Wrap { starts, indent }
+}
+
+/// Moves `delta` rows from row `sub` of line `row`, through `lines` wrapped at `width`,
+/// stopping at either end.
+pub fn step_rows(
+    lines: &[String],
+    width: usize,
+    (mut row, mut sub): (usize, usize),
+    delta: isize,
+) -> (usize, usize) {
+    let mut left = delta.unsigned_abs();
+    let mut rows = wrap(&lines[row], width).rows();
+    sub = sub.min(rows - 1);
+    while left > 0 {
+        if delta > 0 {
+            let n = left.min(rows - 1 - sub);
+            sub += n;
+            left -= n;
+            if left == 0 || row + 1 >= lines.len() {
+                break;
+            }
+            row += 1;
+            rows = wrap(&lines[row], width).rows();
+            sub = 0;
+        } else {
+            let n = left.min(sub);
+            sub -= n;
+            left -= n;
+            if left == 0 || row == 0 {
+                break;
+            }
+            row -= 1;
+            rows = wrap(&lines[row], width).rows();
+            sub = rows - 1;
+        }
+        left -= 1;
+    }
+    (row, sub)
+}
+
 /// One level of indentation for `lines`: a tab if they indent with tabs, else two or four
 /// spaces, whichever more lines use.
 fn detect_indent(lines: &[String]) -> String {
@@ -263,27 +435,48 @@ impl Buffer {
         }
     }
 
-    /// Moves `delta` lines, keeping the display column it started from.
-    pub fn vertical(&mut self, delta: isize, select: bool) {
-        let goal = self
-            .goal
-            .unwrap_or_else(|| display_col(&self.lines[self.cur.row], self.cur.col));
-        let row = (self.cur.row as isize + delta).clamp(0, self.lines.len() as isize - 1) as usize;
-        let col = col_at(&self.lines[row], goal);
+    /// Moves `delta` rows, keeping the screen column it started from. Rows are lines, or the
+    /// rows they wrap into at `width` when it isn't 0.
+    pub fn vertical(&mut self, delta: isize, select: bool, width: usize) {
+        let line = &self.lines[self.cur.row];
+        let w = wrap(line, width);
+        let goal = self.goal.unwrap_or_else(|| w.x_of(line, self.cur.col));
+        let from = (self.cur.row, w.row_of(self.cur.col));
+        let (row, sub) = step_rows(&self.lines, width, from, delta);
+        let line = &self.lines[row];
+        let col = wrap(line, width).col_at(line, sub, goal);
         self.move_to(Pos::new(row, col), select);
         self.goal = Some(goal);
     }
 
-    /// To the first non-blank character, or the line's start if already there.
-    pub fn home(&mut self, select: bool) {
+    /// To the start of the wrapped row, then the first non-blank character, then the line's
+    /// start.
+    pub fn home(&mut self, select: bool, width: usize) {
         let line = &self.lines[self.cur.row];
+        let w = wrap(line, width);
+        let start = w.starts[w.row_of(self.cur.col)];
         let first = line.len() - line.trim_start().len();
-        let col = if self.cur.col == first { 0 } else { first };
+        let col = if start > 0 && self.cur.col != start {
+            start
+        } else if self.cur.col == first {
+            0
+        } else {
+            first
+        };
         self.move_to(Pos::new(self.cur.row, col), select);
     }
 
-    pub fn end(&mut self, select: bool) {
-        let col = self.lines[self.cur.row].len();
+    /// To the end of the wrapped row, then the line's end.
+    pub fn end(&mut self, select: bool, width: usize) {
+        let line = &self.lines[self.cur.row];
+        let w = wrap(line, width);
+        let r = w.row_of(self.cur.col);
+        let end = w.col_at(line, r, usize::MAX);
+        let col = if r + 1 < w.rows() && self.cur.col != end {
+            end
+        } else {
+            line.len()
+        };
         self.move_to(Pos::new(self.cur.row, col), select);
     }
 
@@ -715,10 +908,81 @@ mod tests {
     #[test]
     fn vertical_moves_keep_the_column() {
         let mut b = at("abcdef\nab\nabcdef", 0, 5);
-        b.vertical(1, false);
+        b.vertical(1, false, 0);
         assert_eq!(b.cur, Pos::new(1, 2));
-        b.vertical(1, false);
+        b.vertical(1, false, 0);
         assert_eq!(b.cur, Pos::new(2, 5));
+    }
+
+    fn rows(line: &str, width: usize) -> Vec<&str> {
+        let w = wrap(line, width);
+        (0..w.rows())
+            .map(|r| {
+                let (a, b) = w.span(line, r);
+                &line[a..b]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn wraps_between_words_keeping_the_indent() {
+        assert_eq!(rows("short", 10), ["short"]);
+        assert_eq!(rows("short", 0), ["short"]);
+        assert_eq!(rows("one two three four", 10), ["one two ", "three four"]);
+        assert_eq!(
+            rows("one two three four", 9),
+            ["one two ", "three ", "four"]
+        );
+        assert_eq!(rows("abcdefghijkl", 5), ["abcde", "fghij", "kl"]);
+        assert_eq!(rows("a.b.c(d)", 5), ["a.b.c", "(d)"]);
+        // Whitespace hangs off the end instead of starting a row.
+        assert_eq!(rows("abcde fgh", 5), ["abcde ", "fgh"]);
+        // Continuation rows take the line's indent.
+        let w = wrap("  aaa bbb ccc", 8);
+        assert_eq!(w.indent, 2);
+        assert_eq!(rows("  aaa bbb ccc", 8), ["  aaa ", "bbb ", "ccc"]);
+        // Wide characters break anywhere, but not before closing punctuation.
+        assert_eq!(rows("日本語です。", 6), ["日本語", "です。"]);
+        assert_eq!(rows("日本語。です", 6), ["日本", "語。で", "す"]);
+    }
+
+    #[test]
+    fn maps_columns_through_wrapped_rows() {
+        let line = "  aaa bbb ccc";
+        let w = wrap(line, 8);
+        assert_eq!(w.row_of(6), 1);
+        assert_eq!(w.x_of(line, 6), 2);
+        assert_eq!(w.x_of(line, 8), 4);
+        assert_eq!(w.col_at(line, 1, 3), 7);
+        // Past a row's end lands before its last character, not on the next row.
+        assert_eq!(w.col_at(line, 1, 99), 9);
+        assert_eq!(w.col_at(line, 2, 99), line.len());
+    }
+
+    #[test]
+    fn moves_through_wrapped_rows() {
+        let mut b = at("one two three four\nxy", 0, 1);
+        b.vertical(1, false, 9);
+        assert_eq!(b.cur, Pos::new(0, 9));
+        b.vertical(1, false, 9);
+        assert_eq!(b.cur, Pos::new(0, 15));
+        b.vertical(1, false, 9);
+        assert_eq!(b.cur, Pos::new(1, 1));
+        b.vertical(-2, false, 9);
+        assert_eq!(b.cur, Pos::new(0, 9));
+        b.end(false, 9);
+        assert_eq!(b.cur, Pos::new(0, 13));
+        b.end(false, 9);
+        assert_eq!(b.cur, Pos::new(0, 18));
+        b.home(false, 9);
+        assert_eq!(b.cur, Pos::new(0, 14));
+        b.home(false, 9);
+        assert_eq!(b.cur, Pos::new(0, 0));
+        let lines = b.lines.clone();
+        assert_eq!(step_rows(&lines, 9, (0, 0), 2), (0, 2));
+        assert_eq!(step_rows(&lines, 9, (0, 0), 9), (1, 0));
+        assert_eq!(step_rows(&lines, 9, (1, 0), -2), (0, 1));
+        assert_eq!(step_rows(&lines, 0, (1, 0), -5), (0, 0));
     }
 
     #[test]
