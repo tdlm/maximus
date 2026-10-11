@@ -90,6 +90,7 @@ Global (work everywhere, even while typing in a claude pane — rebind in Settin
 | `ctrl+g`   | Diff viewer for the current session's checkout |
 | `ctrl+k`   | Commit the current session's changes     |
 | `ctrl+t`   | Terminal in the current session's checkout (again to hide) |
+| `ctrl+e`   | Editor: files, the open file and the session's claude side by side (again to close) |
 | `ctrl+y`   | Memory used by claude sessions, shells and maximus |
 | `ctrl+n`   | Overview of every agent as tiles         |
 | `ctrl+s`   | Settings                                 |
@@ -144,6 +145,27 @@ shell. Need a second one beside the dev server? `alt+t` opens another shell in t
 a tab, named after whatever it's running; `alt+↑/↓` switches between tabs and `alt+1`–`9` jumps
 straight to one. `exit` or `ctrl+d` ends a shell and closes its tab. `shift+PgUp/PgDn` or the mouse
 wheel scrolls back. Quitting asks first while any shell is running.
+
+Editor (`ctrl+e`): a full-screen, Cursor-style view of the current session's checkout — the files
+on the left, open files in tabs in the middle and the session's claude on the right. The file
+list shows what git tracks plus untracked files (ignored ones stay out), colours changed files,
+marks files with unsaved edits with `●`, and picks up new files as claude creates them; `j/k`
+move, `enter` opens a file or folder, `space` previews a file while staying in the list (the
+next preview reuses its tab unless you edited it), `/` filters by name. Each open file gets a
+tab showing `●` while it has unsaved edits and a `×` to close it: `ctrl+PgUp`/`ctrl+PgDn` or
+`alt+1`–`9` switch tabs, `ctrl+w`, a middle click or the `×` closes one (a dialog asks to save
+or discard unsaved edits first — click a button or press `y`/`n`/`esc`), and clicking a tab shows it. The
+file is highlighted and
+editable: `ctrl+s` save, `ctrl+z`/`ctrl+y` undo/redo, `ctrl+f` find (`enter`/`↓` next,
+`shift+enter`/`↑` previous), `ctrl+c`/`ctrl+x`/`ctrl+v` copy/cut/paste (the whole line when
+nothing is selected), shift+arrows or the mouse to select, `tab`/`shift+tab` to indent. When
+claude changes an open file it reloads in place, unless you have unsaved edits. `alt+←`/`alt+→`
+(your agent-list/pane keys) move between the panels, and `ctrl+l` jumps to the claude panel and
+back. If no claude is running in the checkout, going to the panel starts one, so you can just
+type; a stopped one resumes. In the claude panel every other key, including `esc`, goes to
+claude. The claude panel is as wide as the file list until you drag it. `ctrl+e` closes the editor from anywhere, as does `esc` in the
+file list; with unsaved changes in any tab it asks to save them all first. Opening it again in the same checkout
+picks up where you left off. Drag the panel borders to resize them.
 
 Memory (`ctrl+y`): resident memory of each running claude session, each terminal shell, and
 maximus itself, with the total. A session or shell counts everything it started (tools, MCP
