@@ -33,6 +33,9 @@ pub fn current_branch(dir: &Path) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The branch name shown for a worktree with a detached HEAD.
+pub const DETACHED: &str = "(detached)";
+
 #[derive(Debug, Clone)]
 pub struct Worktree {
     pub path: PathBuf,
@@ -47,7 +50,7 @@ pub fn worktrees(project: &Path) -> Vec<Worktree> {
     let mut res = Vec::new();
     for block in out.split("\n\n") {
         let mut path = None;
-        let mut branch = String::from("(detached)");
+        let mut branch = String::from(DETACHED);
         for line in block.lines() {
             if let Some(p) = line.strip_prefix("worktree ") {
                 path = Some(PathBuf::from(p));
@@ -104,14 +107,17 @@ pub fn merge_worktree(project: &Path, wt: &Worktree) -> Result<String> {
     Ok(base)
 }
 
-/// Deletes a worktree and its branch. Without `force`, git refuses if the worktree has
-/// changes or the branch isn't merged.
+/// Deletes a worktree and its branch (a detached one has none). Without `force`, git refuses
+/// if the worktree has changes or the branch isn't merged.
 pub fn remove_worktree(project: &Path, wt: &Worktree, force: bool) -> Result<()> {
     let p = wt.path.to_string_lossy();
     if force {
         git(project, &["worktree", "remove", "--force", &p])?;
     } else {
         git(project, &["worktree", "remove", &p])?;
+    }
+    if wt.branch == DETACHED {
+        return Ok(());
     }
     git(
         project,
@@ -374,6 +380,22 @@ mod tests {
         remove_worktree(&main, &wt, false).unwrap();
         assert!(!path.exists());
         assert!(git(&main, &["rev-parse", "--verify", "feat"]).is_err());
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
+
+    #[test]
+    fn removes_a_detached_worktree() {
+        let main = repo("detached");
+        let path = main.with_file_name("detached");
+        git(
+            &main,
+            &["worktree", "add", "-q", "--detach", &path.to_string_lossy()],
+        )
+        .unwrap();
+        let wt = linked_worktree(&main, &path).unwrap();
+        assert_eq!(wt.branch, DETACHED);
+        remove_worktree(&main, &wt, true).unwrap();
+        assert!(!path.exists());
         let _ = std::fs::remove_dir_all(main.parent().unwrap());
     }
 
