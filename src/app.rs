@@ -47,6 +47,8 @@ pub enum AppEvent {
     Memory(Usage),
     /// The editor's file list for this checkout, with git's changes.
     EditorFiles(PathBuf, Vec<String>, Vec<git::Change>),
+    /// The branch each of these checkouts is on now.
+    Branches(Vec<(PathBuf, Option<String>)>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -327,6 +329,9 @@ pub struct App {
     last_click: Option<(Instant, u16, u16)>,
     /// When the memory modal last asked for a measurement.
     memory_fetched: Option<Instant>,
+    /// When session branches were last re-read, and whether a read is in flight.
+    branches_fetched: Instant,
+    branches_pending: bool,
     /// The editor last closed, so opening it again in the same checkout picks up there.
     parked_editor: Option<Box<Editor>>,
 }
@@ -412,6 +417,8 @@ impl App {
             last_second: Instant::now(),
             last_click: None,
             memory_fetched: None,
+            branches_fetched: Instant::now(),
+            branches_pending: false,
             parked_editor: None,
         };
         app.selected = app.rows().into_iter().next();
@@ -1023,6 +1030,25 @@ impl App {
                     e.set_files(files, changes);
                 }
             }
+            AppEvent::Branches(branches) => {
+                self.branches_pending = false;
+                let mut changed = false;
+                for (dir, branch) in branches {
+                    // A checkout that's gone (a removed worktree) keeps its last branch.
+                    if branch.is_none() {
+                        continue;
+                    }
+                    for s in self.sessions.iter_mut().filter(|s| s.cwd == dir) {
+                        if s.branch != branch {
+                            s.branch = branch.clone();
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    self.save();
+                }
+            }
             AppEvent::Graph(dir, rows) => {
                 let g = &mut self.graph;
                 if g.dir.as_ref() == Some(&dir) {
@@ -1148,7 +1174,40 @@ impl App {
             redraw |= self.timeouts();
             self.update_badge();
         }
+        self.refresh_branches();
         redraw
+    }
+
+    /// Every few seconds, re-reads the branch of each active session's checkout in the
+    /// background, so a checkout made by claude or in a terminal shows up.
+    fn refresh_branches(&mut self) {
+        if self.branches_pending || self.branches_fetched.elapsed() < Duration::from_secs(5) {
+            return;
+        }
+        let mut dirs: Vec<PathBuf> = self
+            .sessions
+            .iter()
+            .filter(|s| !s.archived)
+            .map(|s| s.cwd.clone())
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        self.branches_fetched = Instant::now();
+        if dirs.is_empty() {
+            return;
+        }
+        self.branches_pending = true;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let branches = dirs
+                .into_iter()
+                .map(|d| {
+                    let b = git::current_branch(&d);
+                    (d, b)
+                })
+                .collect();
+            let _ = tx.send(AppEvent::Branches(branches));
+        });
     }
 
     fn timeouts(&mut self) -> bool {
