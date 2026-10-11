@@ -180,7 +180,9 @@ A full-screen view of the focused session's checkout (else the selected project'
   copy/cut/paste, undo/redo, find. ctrl+s saves, keeping the file's line endings. An open file
   that changes on disk reloads in place when it has no unsaved edits, so claude's edits show live;
   with unsaved edits the title says it changed on disk instead. Binary, huge and non-UTF-8 files
-  aren't opened for editing. Long lines wrap to the panel's width as in VS Code: between words
+  aren't opened for editing. Beside the line numbers, a bar marks lines changed since HEAD as
+  in VS Code — green for added, blue for modified — and a red tick where lines were deleted;
+  it follows edits as they're typed. Long lines wrap to the panel's width as in VS Code: between words
   where they can (wide CJK characters break anywhere), whitespace hanging off the row's end,
   and rows after the first indented like the line, which is numbered once. Up/down, page keys,
   clicks and the wheel move by wrapped rows; home/end go to the row's start or end first, then
