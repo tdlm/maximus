@@ -10,6 +10,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::{App, Focus, GlobalKeys, GraphLine, Modal, RowKey},
     config::{ListSort, tilde},
+    editor::Focus as EditorFocus,
     memory::{self, Usage},
     overview,
     session::{Session, Status},
@@ -120,6 +121,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let t = app.theme;
     let area = f.area();
     f.render_widget(fill(t.bg), area);
+    // The editor takes the whole screen, and its claude panel sizes the session's pty.
+    if matches!(app.modal, Some(Modal::Editor(_))) {
+        return draw_editor(f, app, area);
+    }
     let main = Rect {
         height: area.height.saturating_sub(1),
         ..area
@@ -264,7 +269,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ),
         Some(Modal::Help(h)) => h.draw(f, area, &app.keys, theme),
         Some(Modal::Memory(u)) => draw_memory(f, area, u.as_ref(), &app.keys, theme),
-        Some(Modal::Terminal(_)) | None => {}
+        Some(Modal::Terminal(_)) | Some(Modal::Editor(_)) | None => {}
     }
 }
 
@@ -597,6 +602,7 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect, msg: String) {
         (k.diff.short(), "View uncommitted changes"),
         (k.commit.short(), "Commit changes"),
         (k.terminal.short(), "Open a terminal in the checkout"),
+        (k.editor.short(), "Browse and edit files beside claude"),
         (k.overview.short(), "Overview of every agent"),
         (k.memory.short(), "Memory used by sessions and shells"),
         (k.graph.short(), "Show/hide the commit graph"),
@@ -705,22 +711,7 @@ fn draw_pane(f: &mut Frame, app: &mut App) {
     let focused = app.focus == Focus::Pane && app.modal.is_none();
     let current = app.current.clone().and_then(|id| app.session_idx(&id));
     let title = match current {
-        Some(i) => {
-            let s = &app.sessions[i];
-            let branch = s.branch.clone().unwrap_or_else(|| "–".into());
-            let model = if s.model.is_empty() {
-                "default".to_string()
-            } else {
-                s.model.clone()
-            };
-            format!(
-                " {} · {} · {} · {} ",
-                app.project_name(&s.project),
-                model,
-                branch,
-                status_word(s)
-            )
-        }
+        Some(i) => session_title(app, i),
         None => " ".into(),
     };
     let block = panel(&title, focused, t);
@@ -745,7 +736,31 @@ fn draw_pane(f: &mut Frame, app: &mut App) {
         draw_help(f, app, inner, msg);
         return;
     };
+    draw_session(f, app, i, inner, focused);
+}
 
+/// A session pane's title: project, model, branch and status.
+fn session_title(app: &App, i: usize) -> String {
+    let s = &app.sessions[i];
+    let branch = s.branch.clone().unwrap_or_else(|| "–".into());
+    let model = if s.model.is_empty() {
+        "default".to_string()
+    } else {
+        s.model.clone()
+    };
+    format!(
+        " {} · {} · {} · {} ",
+        app.project_name(&s.project),
+        model,
+        branch,
+        status_word(s)
+    )
+}
+
+/// Session `i`'s claude in `inner`, sized to fit: the screen, the drag selection, the cursor,
+/// and notes for scrollback and a stopped session.
+fn draw_session(f: &mut Frame, app: &mut App, i: usize, inner: Rect, focused: bool) {
+    let t = app.theme;
     // Keep the pty sized to the pane.
     app.sessions[i].resize(inner.height, inner.width);
     let s = &mut app.sessions[i];
@@ -801,6 +816,48 @@ fn draw_pane(f: &mut Frame, app: &mut App) {
             Paragraph::new(msg).style(Style::default().bg(t.surface).fg(t.yellow)),
             r,
         );
+    }
+}
+
+/// The editor over the whole screen, with the session's claude in its right panel.
+fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+    let Some(Modal::Editor(e)) = &mut app.modal else {
+        return;
+    };
+    let Some(r) = e.draw(f, area, &app.keys, t) else {
+        return;
+    };
+    let focused = e.focus == EditorFocus::Claude && !e.has_prompt();
+    let current = e.session.clone().and_then(|id| app.session_idx(&id));
+    let title = match current {
+        Some(i) => session_title(app, i),
+        None => " Claude ".into(),
+    };
+    let block = panel(&title, focused, t);
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    // Mouse handling and new sessions follow the panel.
+    app.pane_rect = r;
+    app.pane_inner = inner;
+    match current {
+        Some(i) => draw_session(f, app, i, inner, focused),
+        None => {
+            let msg = format!(
+                "No claude running here. Press {} to start one.",
+                app.keys.editor_claude.short()
+            );
+            f.render_widget(
+                Paragraph::new(Line::styled(msg, Style::default().fg(t.muted)))
+                    .wrap(ratatui::widgets::Wrap { trim: true }),
+                Rect {
+                    x: inner.x + 1,
+                    width: inner.width.saturating_sub(2),
+                    y: inner.y + inner.height / 2,
+                    height: inner.height - inner.height / 2,
+                },
+            );
+        }
     }
 }
 
@@ -905,6 +962,7 @@ fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     add(k.switcher.short(), "switch");
     add(k.new_prompt.short(), "new");
     add(k.diff.short(), "diff");
+    add(k.editor.short(), "editor");
     add(k.settings.short(), "settings");
     if app.focus == Focus::List {
         add("⏎".into(), "open");

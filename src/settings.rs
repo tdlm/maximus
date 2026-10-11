@@ -64,6 +64,8 @@ const KEY_NAMES: &[&str] = &[
     "Memory usage",
     "Agent overview",
     "Keyboard shortcuts",
+    "Editor",
+    "Editor: claude panel",
 ];
 
 fn key_slot(cfg: &mut Config, i: usize) -> &mut String {
@@ -82,7 +84,9 @@ fn key_slot(cfg: &mut Config, i: usize) -> &mut String {
         10 => &mut k.terminal,
         11 => &mut k.memory,
         12 => &mut k.overview,
-        _ => &mut k.help,
+        13 => &mut k.help,
+        14 => &mut k.editor,
+        _ => &mut k.editor_claude,
     }
 }
 

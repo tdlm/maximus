@@ -145,6 +145,9 @@ pub struct Keys {
     pub memory: String,
     pub overview: String,
     pub help: String,
+    pub editor: String,
+    /// In the editor: jump to the claude panel and back.
+    pub editor_claude: String,
 }
 
 impl Default for Keys {
@@ -164,6 +167,8 @@ impl Default for Keys {
             memory: "ctrl+y".into(),
             overview: "ctrl+n".into(),
             help: "ctrl+/".into(),
+            editor: "ctrl+e".into(),
+            editor_claude: "ctrl+l".into(),
         }
     }
 }
@@ -251,6 +256,9 @@ pub struct State {
     pub graph_open: bool,
     /// Graph panel height in rows; 0 sizes it automatically.
     pub graph_height: u16,
+    /// Editor file tree width, and claude panel width (0 sizes it automatically).
+    pub editor_tree_width: u16,
+    pub editor_claude_width: u16,
     pub list_sort: ListSort,
     /// Whether the new-project modal starts with git init checked (the last choice).
     pub new_project_git: bool,
@@ -266,6 +274,8 @@ impl Default for State {
             diff_split: true,
             graph_open: true,
             graph_height: 0,
+            editor_tree_width: 30,
+            editor_claude_width: 0,
             list_sort: ListSort::Attention,
             new_project_git: true,
             sessions: vec![],
