@@ -158,6 +158,7 @@ fn sections(k: &GlobalKeys) -> Vec<Section> {
                 ("^s".into(), "Save"),
                 ("^z ^y".into(), "Undo / redo"),
                 ("^f".into(), "Find (⏎ ↓ next, ⇧⏎ ↑ previous)"),
+                ("⌥z".into(), "Word wrap on / off for the file"),
                 (
                     "^c ^x ^v".into(),
                     "Copy / cut / paste (the line without a selection)",

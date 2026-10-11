@@ -221,9 +221,12 @@ struct OpenFile {
     mtime: Option<SystemTime>,
     /// Changed on disk while it had unsaved edits.
     stale: bool,
-    /// First visible line and column.
+    /// First visible line, wrapped row of it and column.
     top: usize,
+    top_sub: usize,
     left: usize,
+    /// Long lines wrap to the panel's width instead of scrolling sideways.
+    wrap: bool,
     /// Scroll to the cursor on the next draw.
     follow: bool,
     hl: Option<Highlighter>,
@@ -264,7 +267,9 @@ fn load(root: &Path, path: &str, theme: &Theme) -> Result<OpenFile, String> {
         mtime,
         stale: false,
         top: 0,
+        top_sub: 0,
         left: 0,
+        wrap: wraps(path),
         follow: true,
         hl,
         preview: false,
@@ -399,6 +404,31 @@ impl Editor {
     /// The file shown.
     fn file(&self) -> Option<&OpenFile> {
         self.tabs.get(self.active)
+    }
+
+    /// The width the shown file wraps at, or 0 if it doesn't.
+    fn wrap_width(&self) -> usize {
+        match self.file() {
+            Some(of) if of.wrap => self.text_rect.width as usize,
+            _ => 0,
+        }
+    }
+
+    /// Alt+z: wraps the shown file's long lines, or stops, as in VS Code.
+    fn toggle_wrap(&mut self) {
+        let Some(of) = self.tabs.get_mut(self.active) else {
+            return;
+        };
+        of.wrap = !of.wrap;
+        of.left = 0;
+        of.top_sub = 0;
+        of.follow = true;
+        let msg = if of.wrap {
+            "Word wrap on"
+        } else {
+            "Word wrap off"
+        };
+        self.say(msg, false);
     }
 
     fn tab_of(&self, path: &str) -> Option<usize> {
@@ -615,7 +645,9 @@ impl Editor {
                     nb.move_to(ob.cur, false);
                 }
                 of.top = old.top;
+                of.top_sub = old.top_sub;
                 of.left = old.left;
+                of.wrap = old.wrap;
                 of.follow = false;
                 of.preview = old.preview;
                 *old = of;
@@ -798,6 +830,10 @@ impl Editor {
                 self.activate(c as usize - '1' as usize);
                 return EditorAction::None;
             }
+            KeyCode::Char('z') if alt && self.focus != Focus::Claude => {
+                self.toggle_wrap();
+                return EditorAction::None;
+            }
             _ => {}
         }
         match self.focus {
@@ -941,6 +977,7 @@ impl Editor {
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         let shift = k.modifiers.contains(KeyModifiers::SHIFT);
         let page = self.text_rect.height.saturating_sub(1).max(1) as isize;
+        let width = self.wrap_width();
         let Some(of) = self.tabs.get_mut(self.active) else {
             if k.code == KeyCode::Esc {
                 self.focus = Focus::Tree;
@@ -973,7 +1010,7 @@ impl Editor {
                     if row + 1 < buf.lines.len() {
                         buf.move_to(Pos::new(row + 1, 0), true);
                     } else {
-                        buf.end(true);
+                        buf.end(true, 0);
                     }
                 }
                 copied = if k.code == KeyCode::Char('x') {
@@ -1016,14 +1053,14 @@ impl Editor {
             KeyCode::Right if alt || ctrl => buf.word_right(shift),
             KeyCode::Left => buf.left(shift),
             KeyCode::Right => buf.right(shift),
-            KeyCode::Up => buf.vertical(-1, shift),
-            KeyCode::Down => buf.vertical(1, shift),
-            KeyCode::PageUp => buf.vertical(-page, shift),
-            KeyCode::PageDown => buf.vertical(page, shift),
+            KeyCode::Up => buf.vertical(-1, shift, width),
+            KeyCode::Down => buf.vertical(1, shift, width),
+            KeyCode::PageUp => buf.vertical(-page, shift, width),
+            KeyCode::PageDown => buf.vertical(page, shift, width),
             KeyCode::Home if ctrl => buf.doc_start(shift),
             KeyCode::End if ctrl => buf.doc_end(shift),
-            KeyCode::Home => buf.home(shift),
-            KeyCode::End => buf.end(shift),
+            KeyCode::Home => buf.home(shift, width),
+            KeyCode::End => buf.end(shift, width),
             _ => {}
         }
         // Editing a preview keeps it open.
@@ -1098,10 +1135,15 @@ impl Editor {
         let of = self.file()?;
         let buf = of.buf.as_ref()?;
         let r = self.text_rect;
-        let row = (of.top as isize + y as isize - r.y as isize)
-            .clamp(0, buf.lines.len() as isize - 1) as usize;
-        let col = of.left + x.saturating_sub(r.x) as usize;
-        Some(Pos::new(row, buffer::col_at(&buf.lines[row], col)))
+        let width = self.wrap_width();
+        let dy = y as isize - r.y as isize;
+        let (row, sub) = buffer::step_rows(&buf.lines, width, (of.top, of.top_sub), dy);
+        let line = &buf.lines[row];
+        let x = of.left + x.saturating_sub(r.x) as usize;
+        Some(Pos::new(
+            row,
+            buffer::wrap(line, width).col_at(line, sub, x),
+        ))
     }
 
     pub fn handle_mouse(&mut self, m: MouseEvent, theme: &Theme) -> MouseTarget {
@@ -1218,13 +1260,16 @@ impl Editor {
                     } else {
                         (self.sel + 1).min(last)
                     };
-                } else if inside(self.file_rect)
-                    && let Some(of) = self.tabs.get_mut(self.active)
-                    && let Some(buf) = &of.buf
-                {
-                    let top = of.top as isize + if up { -3 } else { 3 };
-                    of.top = top.clamp(0, buf.lines.len() as isize - 1) as usize;
-                    of.follow = false;
+                } else if inside(self.file_rect) {
+                    let width = self.wrap_width();
+                    if let Some(of) = self.tabs.get_mut(self.active)
+                        && let Some(buf) = &of.buf
+                    {
+                        let delta = if up { -3 } else { 3 };
+                        (of.top, of.top_sub) =
+                            buffer::step_rows(&buf.lines, width, (of.top, of.top_sub), delta);
+                        of.follow = false;
+                    }
                 }
             }
             _ => {}
@@ -1465,22 +1510,35 @@ impl Editor {
         };
         self.text_rect = text;
         let (h, w) = (text.height as usize, text.width as usize);
+        // Wrapping lays lines out in rows `ww` wide; without it each line is one row.
+        let ww = if of.wrap { w } else { 0 };
+        if of.wrap {
+            of.left = 0;
+        }
         let cur = buf.cur;
-        let cur_col = buffer::display_col(&buf.lines[cur.row], cur.col);
+        let cur_wrap = buffer::wrap(&buf.lines[cur.row], ww);
+        let cur_sub = cur_wrap.row_of(cur.col);
+        let cur_x = cur_wrap.x_of(&buf.lines[cur.row], cur.col);
+        of.top = of.top.min(buf.lines.len().saturating_sub(1));
+        of.top_sub = of
+            .top_sub
+            .min(buffer::wrap(&buf.lines[of.top], ww).rows() - 1);
         if of.follow {
-            if cur.row < of.top {
-                of.top = cur.row;
-            } else if h > 0 && cur.row >= of.top + h {
-                of.top = cur.row + 1 - h;
+            if (cur.row, cur_sub) < (of.top, of.top_sub) {
+                (of.top, of.top_sub) = (cur.row, cur_sub);
+            } else if h > 0
+                && rows_between(&buf.lines, ww, (of.top, of.top_sub), (cur.row, cur_sub), h) >= h
+            {
+                (of.top, of.top_sub) =
+                    buffer::step_rows(&buf.lines, ww, (cur.row, cur_sub), 1 - h as isize);
             }
-            if cur_col < of.left {
-                of.left = cur_col;
-            } else if w > 0 && cur_col >= of.left + w {
-                of.left = cur_col + 1 - w;
+            if cur_x < of.left {
+                of.left = cur_x;
+            } else if ww == 0 && w > 0 && cur_x >= of.left + w {
+                of.left = cur_x + 1 - w;
             }
             of.follow = false;
         }
-        of.top = of.top.min(buf.lines.len().saturating_sub(1));
         let hl = of
             .hl
             .get_or_insert_with(|| Highlighter::new(&of.path, t, buf.lines.len()));
@@ -1490,16 +1548,15 @@ impl Editor {
         hl.ensure(&buf.lines, of.top + h);
         let sel = buf.selection();
         let mut lines = Vec::new();
-        for row in of.top..(of.top + h).min(buf.lines.len()) {
+        let (mut row, mut sub) = (of.top, of.top_sub);
+        while lines.len() < h && row < buf.lines.len() {
+            let line = &buf.lines[row];
+            let wr = buffer::wrap(line, ww);
             let num_style = if row == cur.row {
                 Style::default().fg(t.accent)
             } else {
                 Style::default().fg(t.border)
             };
-            let mut spans = vec![Span::styled(
-                format!(" {:>n$} ", row + 1, n = gw - 2),
-                num_style,
-            )];
             let range = sel.and_then(|(a, b)| {
                 (row >= a.row && row <= b.row).then(|| {
                     let start = if row == a.row { a.col } else { 0 };
@@ -1507,16 +1564,54 @@ impl Editor {
                     (start, end, row < b.row)
                 })
             });
-            spans.extend(render_line(&hl.lines[row], range, of.left, w, t.selection));
-            lines.push(Line::from(spans));
+            for s in sub..wr.rows() {
+                if lines.len() >= h {
+                    break;
+                }
+                // The number on the line's first row only.
+                let num = if s == 0 {
+                    format!(" {:>n$} ", row + 1, n = gw - 2)
+                } else {
+                    " ".repeat(gw)
+                };
+                let mut spans = vec![Span::styled(num, num_style)];
+                if ww == 0 {
+                    spans.extend(render_line(&hl.lines[row], range, of.left, w, t.selection));
+                } else {
+                    let indent = if s > 0 { wr.indent } else { 0 };
+                    let (start, end) = wr.span(line, s);
+                    let left = buffer::display_col(line, start);
+                    // Whitespace hanging off a row's end is cut at the edge; the last row
+                    // leaves room for the selection's line-end mark.
+                    let room = w.saturating_sub(indent);
+                    let room = if s + 1 < wr.rows() {
+                        (buffer::display_col(line, end) - left).min(room)
+                    } else {
+                        room
+                    };
+                    spans.push(Span::raw(" ".repeat(indent)));
+                    spans.extend(render_line(&hl.lines[row], range, left, room, t.selection));
+                }
+                lines.push(Line::from(spans));
+            }
+            row += 1;
+            sub = 0;
         }
         f.render_widget(Paragraph::new(lines), inner);
-        let in_view = cur.row >= of.top && cur.row < of.top + h && cur_col >= of.left;
-        if focused && self.find.is_none() && in_view && cur_col - of.left < w {
-            f.set_cursor_position((
-                text.x + (cur_col - of.left) as u16,
-                text.y + (cur.row - of.top) as u16,
-            ));
+        let below = (cur.row, cur_sub) >= (of.top, of.top_sub);
+        if focused
+            && self.find.is_none()
+            && below
+            && cur_x >= of.left
+            && (ww > 0 || cur_x - of.left < w)
+            && w > 0
+        {
+            let dy = rows_between(&buf.lines, ww, (of.top, of.top_sub), (cur.row, cur_sub), h);
+            if dy < h {
+                // A row's hanging whitespace can put the cursor past the edge.
+                let dx = (cur_x - of.left).min(w - 1);
+                f.set_cursor_position((text.x + dx as u16, text.y + dy as u16));
+            }
         }
         if let (Some(find), Some(r)) = (&self.find, find_row) {
             let label = " find ";
@@ -1731,6 +1826,7 @@ impl Editor {
                     add(&mut spans, "^s".into(), "save");
                     add(&mut spans, "^z ^y".into(), "undo/redo");
                     add(&mut spans, "^f".into(), "find");
+                    add(&mut spans, "⌥z".into(), "wrap");
                     add(&mut spans, "^w".into(), "close tab");
                     add(&mut spans, "^PgUp ^PgDn".into(), "tabs");
                     add(&mut spans, keys.editor_claude.short(), "claude");
@@ -1833,6 +1929,37 @@ fn walk_tree(
             open: false,
         });
     }
+}
+
+/// Whether a file starts with its lines wrapped: all but minified code, source maps and
+/// tables, whose lines read better whole.
+fn wraps(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    ![".min.js", ".min.mjs", ".min.css", ".map", ".csv", ".tsv"]
+        .iter()
+        .any(|ext| name.ends_with(ext))
+}
+
+/// Rows of `lines` wrapped at `width` from `from` down to `to` (each a line and a row of it),
+/// counting no further than `most`.
+fn rows_between(
+    lines: &[String],
+    width: usize,
+    from: (usize, usize),
+    to: (usize, usize),
+    most: usize,
+) -> usize {
+    if to.0 == from.0 {
+        return to.1.saturating_sub(from.1);
+    }
+    let mut n = buffer::wrap(&lines[from.0], width).rows() - from.1;
+    for line in &lines[from.0 + 1..to.0] {
+        if n >= most {
+            return n;
+        }
+        n += buffer::wrap(line, width).rows();
+    }
+    n + to.1
 }
 
 /// One buffer line's spans: highlighted, tabs expanded, `width` columns from column `left`.
@@ -1951,11 +2078,30 @@ mod tests {
             mtime: None,
             stale: false,
             top: 0,
+            top_sub: 0,
             left: 0,
+            wrap: true,
             follow: false,
             hl: None,
             preview: false,
         }
+    }
+
+    #[test]
+    fn wraps_all_but_minified_files_and_tables() {
+        assert!(wraps("README.md"));
+        assert!(wraps("src/main.rs"));
+        assert!(!wraps("dist/app.min.js"));
+        assert!(!wraps("data/Report.CSV"));
+        assert!(!wraps("app.js.map"));
+    }
+
+    #[test]
+    fn counts_wrapped_rows_between_positions() {
+        let lines: Vec<String> = ["one two three four", "x", "y"].map(String::from).into();
+        assert_eq!(rows_between(&lines, 9, (0, 1), (0, 2), 99), 1);
+        assert_eq!(rows_between(&lines, 9, (0, 1), (2, 0), 99), 3);
+        assert_eq!(rows_between(&lines, 0, (0, 0), (2, 0), 99), 2);
     }
 
     #[test]
