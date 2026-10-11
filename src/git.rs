@@ -107,6 +107,11 @@ pub fn merge_worktree(project: &Path, wt: &Worktree) -> Result<String> {
     Ok(base)
 }
 
+/// Forgets worktrees whose folders were deleted outside git.
+pub fn prune_worktrees(project: &Path) {
+    let _ = git(project, &["worktree", "prune"]);
+}
+
 /// Deletes a worktree and its branch (a detached one has none). Without `force`, git refuses
 /// if the worktree has changes or the branch isn't merged.
 pub fn remove_worktree(project: &Path, wt: &Worktree, force: bool) -> Result<()> {

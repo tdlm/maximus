@@ -32,6 +32,7 @@ pub enum Cmd {
     Help,
     MergeWorktree(String),
     DiscardWorktree(String),
+    CleanWorktrees,
     DefaultModel(String),
     Theme(&'static str),
     Quit,

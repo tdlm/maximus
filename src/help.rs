@@ -59,6 +59,7 @@ fn sections(k: &GlobalKeys) -> Vec<Section> {
                 ("e", "Rename session"),
                 ("x", "Close session / remove project"),
                 ("m", "Merge the session's worktree"),
+                ("W", "Clean up unused worktrees"),
                 ("d", "Diff viewer"),
                 ("t", "Show/hide the commit graph"),
                 ("s", "Sort: attention, name A→Z, Z→A"),
