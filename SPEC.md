@@ -230,7 +230,7 @@ A config still holding the old `f1` default moves to ctrl+/ on load.
 
 ## Settings (ctrl+s)
 
-Modal with tabs: **General** (default model, effort, permission mode, project roots for Add folder) ·
+Modal with tabs: **General** (default model, effort, permission mode, Chrome via `claude --chrome`, project roots for Add folder) ·
 **Sessions** (timeouts) · **Keys** (rebind) · **Notifications** · **Theme** (palette, startup animation).
 Stored at `~/.config/maximus/config.toml`; project list + layout in `~/.local/state/maximus/`.
 
