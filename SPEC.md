@@ -71,8 +71,8 @@ ctrl+n history-next, ctrl+e end-of-line).
 One fuzzy list, sectioned:
 1. **Sessions** — all projects, attention order (needs input → working → unseen → rest)
 2. **Projects** — jump to project (its most recent session)
-3. **Commands** — new worktree, merge or discard the current worktree, remove project, change
-   default model, open settings, …
+3. **Commands** — new worktree, merge or discard the current worktree, clean up unused worktrees,
+   remove project, change default model, open settings, …
 4. **Add folder** — fuzzy directory finder (rooted at configurable dirs, e.g. `~/Dev`)
 
 ## New project
@@ -107,6 +107,10 @@ Centered modal:
 main checkout's current branch, stops and archives the worktree's sessions, then deletes the
 worktree and the branch. Refused if the worktree has uncommitted changes; a conflicted merge is
 aborted. **Discard worktree** force-deletes both without merging, after a confirm.
+
+`W` in the agent list (or **Clean up unused worktrees** in the switcher) force-deletes every linked
+worktree, across all projects, that has no running session or shell, along with its branch. The
+confirm names them and counts any with uncommitted changes; their stopped sessions are archived.
 
 ## Diff viewer (ctrl+g)
 
