@@ -199,6 +199,26 @@ pub fn changes(dir: &Path) -> Result<Vec<Change>> {
     Ok(res)
 }
 
+/// Files in the checkout that git tracks or would track: committed, staged and untracked,
+/// leaving out ignored ones. Paths are relative to `dir`.
+pub fn files(dir: &Path) -> Result<Vec<String>> {
+    let out = git(
+        dir,
+        &[
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+    )?;
+    Ok(out
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .collect())
+}
+
 /// File contents at HEAD, or None if absent.
 pub fn head_contents(dir: &Path, path: &str) -> Option<Vec<u8>> {
     git(dir, &["show", &format!("HEAD:{path}")]).ok()
