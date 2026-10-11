@@ -14,7 +14,9 @@ use ratatui::{
 };
 use similar::{DiffTag, TextDiff};
 use syntect::{
-    easy::HighlightLines, highlighting::Theme as SynTheme, parsing::SyntaxSet,
+    easy::HighlightLines,
+    highlighting::Theme as SynTheme,
+    parsing::{SyntaxReference, SyntaxSet},
     util::LinesWithEndings,
 };
 use two_face::re_exports::syntect;
@@ -28,9 +30,9 @@ use crate::{
     ui,
 };
 
-const MAX_BYTES: usize = 2_000_000;
+pub const MAX_BYTES: usize = 2_000_000;
 
-fn syntaxes() -> &'static SyntaxSet {
+pub fn syntaxes() -> &'static SyntaxSet {
     static S: OnceLock<SyntaxSet> = OnceLock::new();
     S.get_or_init(two_face::syntax::extra_newlines)
 }
@@ -40,7 +42,7 @@ fn syn_themes() -> &'static two_face::theme::EmbeddedLazyThemeSet {
     T.get_or_init(two_face::theme::extra)
 }
 
-fn syn_theme(syntax: Syntax) -> SynTheme {
+pub fn syn_theme(syntax: Syntax) -> SynTheme {
     match syntax {
         Syntax::Embedded(name) => syn_themes().get(name).clone(),
         Syntax::Custom(custom) => custom.build(),
@@ -78,7 +80,7 @@ enum Row {
     },
 }
 
-type HlLine = Vec<(Style, String)>;
+pub type HlLine = Vec<(Style, String)>;
 
 struct FileDiff {
     split: Vec<Row>,
@@ -911,7 +913,7 @@ fn load_entry(root: &Path, change: git::Change) -> FileEntry {
 }
 
 /// Why two file versions can't be shown as a text diff, if they can't.
-fn unreadable(old: &Option<Vec<u8>>, new: &Option<Vec<u8>>) -> Option<&'static str> {
+pub fn unreadable(old: &Option<Vec<u8>>, new: &Option<Vec<u8>>) -> Option<&'static str> {
     let is_binary = |b: &Option<Vec<u8>>| {
         b.as_ref()
             .is_some_and(|b| b[..b.len().min(8000)].contains(&0))
@@ -1014,14 +1016,37 @@ impl FilePreview {
     }
 }
 
-fn highlight(text: &str, path: &str, theme: &SynTheme) -> Vec<HlLine> {
+/// The syntax for a file, by its full name (`Makefile`) or extension.
+pub fn syntax_for(path: &str) -> &'static SyntaxReference {
     let ss = syntaxes();
     let ext = path.rsplit('.').next().unwrap_or("");
     let name = path.rsplit('/').next().unwrap_or(path);
-    let syntax = ss
-        .find_syntax_by_extension(name)
+    ss.find_syntax_by_extension(name)
         .or_else(|| ss.find_syntax_by_extension(ext))
-        .unwrap_or_else(|| ss.find_syntax_plain_text());
+        .unwrap_or_else(|| ss.find_syntax_plain_text())
+}
+
+pub fn style_of(st: syntect::highlighting::Style) -> Style {
+    let c = st.foreground;
+    let mut style = Style::default().fg(Color::Rgb(c.r, c.g, c.b));
+    if st
+        .font_style
+        .contains(syntect::highlighting::FontStyle::BOLD)
+    {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if st
+        .font_style
+        .contains(syntect::highlighting::FontStyle::ITALIC)
+    {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    style
+}
+
+fn highlight(text: &str, path: &str, theme: &SynTheme) -> Vec<HlLine> {
+    let ss = syntaxes();
+    let syntax = syntax_for(path);
     let plain = text.lines().count() > 30_000;
     let mut h = HighlightLines::new(syntax, theme);
     let mut out = Vec::new();
@@ -1035,23 +1060,7 @@ fn highlight(text: &str, path: &str, theme: &SynTheme) -> Vec<HlLine> {
             Ok(ranges) => out.push(
                 ranges
                     .into_iter()
-                    .map(|(st, s)| {
-                        let c = st.foreground;
-                        let mut style = Style::default().fg(Color::Rgb(c.r, c.g, c.b));
-                        if st
-                            .font_style
-                            .contains(syntect::highlighting::FontStyle::BOLD)
-                        {
-                            style = style.add_modifier(Modifier::BOLD);
-                        }
-                        if st
-                            .font_style
-                            .contains(syntect::highlighting::FontStyle::ITALIC)
-                        {
-                            style = style.add_modifier(Modifier::ITALIC);
-                        }
-                        (style, clean(s))
-                    })
+                    .map(|(st, s)| (style_of(st), clean(s)))
                     .collect(),
             ),
             Err(_) => out.push(vec![(Style::default(), clean(line))]),
