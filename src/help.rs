@@ -27,6 +27,10 @@ fn sections(k: &GlobalKeys) -> Vec<Section> {
                 (k.diff.short(), "Diff viewer for the current checkout"),
                 (k.commit.short(), "Commit the current session's changes"),
                 (k.terminal.short(), "Terminal in the current checkout"),
+                (
+                    k.editor.short(),
+                    "Editor: files, code and the session's claude",
+                ),
                 (k.memory.short(), "Memory used by sessions and shells"),
                 (k.overview.short(), "Overview of every agent"),
                 (k.graph.short(), "Show/hide the commit graph"),
@@ -130,6 +134,36 @@ fn sections(k: &GlobalKeys) -> Vec<Section> {
                 ("⌥1-9".into(), "Go to shell 1-9"),
                 ("^d".into(), "End the shell"),
                 ("⇧PgUp PgDn".into(), "Scroll back (or the mouse wheel)"),
+            ],
+        ),
+        (
+            "Editor",
+            vec![
+                (k.editor.short(), "Close, asking to save unsaved changes"),
+                (
+                    k.editor_claude.short(),
+                    "Claude panel and back (starts claude if none is running)",
+                ),
+                (
+                    format!("{} {}", k.focus_list.short(), k.focus_pane.short()),
+                    "Panel to the left / right: files, file, claude",
+                ),
+                ("j k ⏎".into(), "Files: move, open a file or folder"),
+                ("/".into(), "Files: filter by name"),
+                ("space".into(), "Files: preview a file, staying in the list"),
+                ("^PgUp ^PgDn".into(), "Previous / next tab"),
+                ("⌥1-9".into(), "Jump to a tab"),
+                ("^w".into(), "Close the tab, asking to save unsaved changes"),
+                ("esc".into(), "File: back to the files; files: close"),
+                ("^s".into(), "Save"),
+                ("^z ^y".into(), "Undo / redo"),
+                ("^f".into(), "Find (⏎ ↓ next, ⇧⏎ ↑ previous)"),
+                (
+                    "^c ^x ^v".into(),
+                    "Copy / cut / paste (the line without a selection)",
+                ),
+                ("⇧ arrows".into(), "Select"),
+                ("tab ⇧tab".into(), "Indent / dedent"),
             ],
         ),
         (

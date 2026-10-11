@@ -26,6 +26,7 @@ pub enum Cmd {
     ResumeSession(String),
     Commit,
     Terminal,
+    Editor,
     Memory,
     Overview,
     Help,

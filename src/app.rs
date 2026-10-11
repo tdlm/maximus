@@ -13,6 +13,7 @@ use ratatui::layout::Rect;
 use crate::{
     config::{Config, ListSort, ProjectEntry, State, expand, tilde},
     diff::{DiffAction, DiffView, FilePreview},
+    editor::{self, Editor, EditorAction, Focus as EditorFocus, MouseTarget},
     git::{self, GraphRow},
     help::{Help, HelpAction},
     hooks::HookMsg,
@@ -44,6 +45,8 @@ pub enum AppEvent {
     ShellExited(u64),
     /// A memory measurement for the memory modal.
     Memory(Usage),
+    /// The editor's file list for this checkout, with git's changes.
+    EditorFiles(PathBuf, Vec<String>, Vec<git::Change>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +101,8 @@ pub enum Modal {
     Overview(Overview),
     /// Every keyboard shortcut.
     Help(Help),
+    /// Files, the open file and the session's claude, side by side.
+    Editor(Box<Editor>),
 }
 
 pub struct GlobalKeys {
@@ -115,6 +120,8 @@ pub struct GlobalKeys {
     pub memory: KeySet,
     pub overview: KeySet,
     pub help: KeySet,
+    pub editor: KeySet,
+    pub editor_claude: KeySet,
 }
 
 impl GlobalKeys {
@@ -135,6 +142,8 @@ impl GlobalKeys {
             memory: KeySet::parse(&k.memory),
             overview: KeySet::parse(&k.overview),
             help: KeySet::parse(&k.help),
+            editor: KeySet::parse(&k.editor),
+            editor_claude: KeySet::parse(&k.editor_claude),
         }
     }
 }
@@ -318,6 +327,8 @@ pub struct App {
     last_click: Option<(Instant, u16, u16)>,
     /// When the memory modal last asked for a measurement.
     memory_fetched: Option<Instant>,
+    /// The editor last closed, so opening it again in the same checkout picks up there.
+    parked_editor: Option<Box<Editor>>,
 }
 
 fn rank(s: &Session) -> u8 {
@@ -401,6 +412,7 @@ impl App {
             last_second: Instant::now(),
             last_click: None,
             memory_fetched: None,
+            parked_editor: None,
         };
         app.selected = app.rows().into_iter().next();
         app.scan_folders();
@@ -1004,6 +1016,13 @@ impl App {
                     *m = Some(u);
                 }
             }
+            AppEvent::EditorFiles(root, files, changes) => {
+                if let Some(Modal::Editor(e)) = &mut self.modal
+                    && e.root == root
+                {
+                    e.set_files(files, changes);
+                }
+            }
             AppEvent::Graph(dir, rows) => {
                 let g = &mut self.graph;
                 if g.dir.as_ref() == Some(&dir) {
@@ -1061,8 +1080,12 @@ impl App {
             _ => None,
         };
         let Some(next) = next else { return };
-        let visible =
-            self.app_focused && self.current.as_deref() == Some(&m.sid) && self.modal.is_none();
+        let shown = match &self.modal {
+            None => self.current.as_deref() == Some(&m.sid),
+            Some(Modal::Editor(e)) => e.claude_shown() && e.session.as_deref() == Some(&m.sid),
+            Some(_) => false,
+        };
+        let visible = self.app_focused && shown;
         let s = &mut self.sessions[i];
         if prev == Status::Stopped {
             return;
@@ -1110,6 +1133,10 @@ impl App {
         let mut redraw = self.sessions.iter().any(|s| s.status == Status::Working);
         redraw |= self.refresh_graph();
         self.refresh_memory();
+        if let Some(Modal::Editor(e)) = &mut self.modal {
+            redraw |= e.tick(self.theme);
+        }
+        self.refresh_editor_files();
         if let Some((_, at)) = &self.toast
             && at.elapsed() > Duration::from_secs(4)
         {
@@ -1204,6 +1231,12 @@ impl App {
     }
 
     fn handle_paste(&mut self, s: &str) {
+        if matches!(&self.modal, Some(Modal::Editor(e)) if e.focus == EditorFocus::Claude) {
+            if let Some(i) = self.pane_session() {
+                self.paste_to_session(i, s);
+            }
+            return;
+        }
         match &mut self.modal {
             Some(Modal::Switcher(sw)) => sw.paste(s),
             Some(Modal::Help(h)) => h.paste(s),
@@ -1212,6 +1245,7 @@ impl App {
             Some(Modal::Rename(r)) => r.input.insert_str(s),
             Some(Modal::NewProject(np)) => np.paste(s),
             Some(Modal::Diff(d)) => d.paste(s),
+            Some(Modal::Editor(e)) => e.paste(s),
             Some(Modal::Terminal(id)) => {
                 if let Some(t) = self.terminals.iter_mut().find(|t| t.id == *id) {
                     let bracketed = t.parser.lock().unwrap().screen().bracketed_paste();
@@ -1223,17 +1257,21 @@ impl App {
                 if self.focus == Focus::Pane
                     && let Some(i) = self.current.clone().and_then(|c| self.session_idx(&c))
                 {
-                    let bracketed = self.sessions[i]
-                        .parser
-                        .lock()
-                        .unwrap()
-                        .screen()
-                        .bracketed_paste();
-                    self.sessions[i].scroll = 0;
-                    self.sessions[i].write(&session::paste_bytes(s, bracketed));
+                    self.paste_to_session(i, s);
                 }
             }
         }
+    }
+
+    fn paste_to_session(&mut self, i: usize, s: &str) {
+        let bracketed = self.sessions[i]
+            .parser
+            .lock()
+            .unwrap()
+            .screen()
+            .bracketed_paste();
+        self.sessions[i].scroll = 0;
+        self.sessions[i].write(&session::paste_bytes(s, bracketed));
     }
 
     // ---------- modals ----------
@@ -1307,6 +1345,10 @@ impl App {
         items.push(Item {
             detail: k.terminal.short(),
             ..cmd("Open terminal".into(), Cmd::Terminal)
+        });
+        items.push(Item {
+            detail: k.editor.short(),
+            ..cmd("Open editor".into(), Cmd::Editor)
         });
         items.push(Item {
             detail: k.overview.short(),
@@ -1560,6 +1602,150 @@ impl App {
         self.modal = Some(Modal::Help(Help::default()));
     }
 
+    /// Opens the editor on the current checkout with the current session's claude beside it,
+    /// picking up the last one if it was in the same checkout.
+    fn open_editor(&mut self) {
+        let Some(dir) = self.checkout_dir() else {
+            self.toast("Add a project first");
+            return;
+        };
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        let session = self.current.clone();
+        let e = match self.parked_editor.take() {
+            Some(mut e) if e.root == root => {
+                e.reopen(session, self.theme);
+                e
+            }
+            _ => Box::new(Editor::new(
+                root,
+                session,
+                self.theme,
+                self.state.editor_tree_width,
+                self.state.editor_claude_width,
+            )),
+        };
+        self.selection = None;
+        self.modal = Some(Modal::Editor(e));
+        self.refresh_editor_files();
+    }
+
+    fn close_editor(&mut self) {
+        self.keep_editor_layout();
+        if let Some(Modal::Editor(e)) = self.modal.take() {
+            self.parked_editor = Some(e);
+        }
+        self.selection = None;
+        self.mark_seen();
+    }
+
+    /// Saves the editor's panel widths when a separator drag changed them.
+    fn keep_editor_layout(&mut self) {
+        if let Some(Modal::Editor(e)) = &self.modal
+            && (self.state.editor_tree_width, self.state.editor_claude_width)
+                != (e.tree_width, e.claude_width)
+        {
+            self.state.editor_tree_width = e.tree_width;
+            self.state.editor_claude_width = e.claude_width;
+            let _ = self.state.save();
+        }
+    }
+
+    /// While the editor is open, lists its files again every few seconds in the background.
+    fn refresh_editor_files(&mut self) {
+        let Some(Modal::Editor(e)) = &mut self.modal else {
+            return;
+        };
+        if !e.wants_files() {
+            return;
+        }
+        e.files_requested();
+        let root = e.root.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let files = editor::list_files(&root);
+            let changes = git::changes(&root).unwrap_or_default();
+            let _ = tx.send(AppEvent::EditorFiles(root, files, changes));
+        });
+    }
+
+    /// The session in the pane: the editor's claude panel while it's open, else the current one.
+    fn pane_session(&self) -> Option<usize> {
+        let id = match &self.modal {
+            Some(Modal::Editor(e)) => e.session.as_ref(),
+            _ => self.current.as_ref(),
+        }?;
+        self.session_idx(id)
+    }
+
+    /// Focuses the editor's claude panel, resuming its session if it stopped, or starting
+    /// claude in the checkout if it has none, so there's always somewhere to type.
+    fn editor_focus_claude(&mut self) {
+        let Some(Modal::Editor(e)) = &mut self.modal else {
+            return;
+        };
+        if !e.claude_shown() {
+            return;
+        }
+        e.focus = EditorFocus::Claude;
+        match self.pane_session() {
+            Some(i) if self.sessions[i].pty.is_none() => {
+                let id = self.sessions[i].id.clone();
+                self.resume(&id);
+            }
+            Some(_) => {}
+            None => self.start_editor_session(),
+        }
+    }
+
+    /// Starts claude without a prompt in the selected project, shown in the editor's panel.
+    fn start_editor_session(&mut self) {
+        let Some(project) = self.selected_project() else {
+            return;
+        };
+        let s = Session::new(
+            project.clone(),
+            project.clone(),
+            git::current_branch(&project),
+            String::new(),
+            self.cfg.default_model.clone(),
+            self.cfg.default_effort.clone(),
+        );
+        let id = s.id.clone();
+        self.sessions.push(s);
+        // Sized to the panel, which the last draw left in pane_inner.
+        self.spawn(self.sessions.len() - 1, None, false);
+        self.save();
+        self.current = Some(id.clone());
+        self.selected = Some(RowKey::Session(id.clone()));
+        if let Some(Modal::Editor(e)) = &mut self.modal {
+            e.session = Some(id);
+        }
+    }
+
+    /// A key for the editor's claude panel. A stopped session resumes on enter, and esc goes
+    /// back to the file; everything else goes to claude.
+    fn editor_claude_key(&mut self, k: KeyEvent) {
+        let Some(i) = self.pane_session() else {
+            return;
+        };
+        if self.sessions[i].pty.is_none() {
+            match k.code {
+                KeyCode::Enter | KeyCode::Char('r') => {
+                    let id = self.sessions[i].id.clone();
+                    self.resume(&id);
+                }
+                KeyCode::Esc => {
+                    if let Some(Modal::Editor(e)) = &mut self.modal {
+                        e.focus = EditorFocus::File;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        self.session_key(i, k);
+    }
+
     fn open_overview(&mut self) {
         self.modal = Some(Modal::Overview(Overview::default()));
     }
@@ -1673,6 +1859,7 @@ impl App {
                 Cmd::Diff => self.open_diff(false),
                 Cmd::Commit => self.open_diff(true),
                 Cmd::Terminal => self.open_terminal(),
+                Cmd::Editor => self.open_editor(),
                 Cmd::Memory => self.open_memory(),
                 Cmd::Overview => self.open_overview(),
                 Cmd::Help => self.open_help(),
@@ -1812,6 +1999,36 @@ impl App {
                         self.terminal_key(id, k);
                     }
                 }
+                Modal::Editor(e) => {
+                    let theme = self.theme;
+                    if e.has_prompt() {
+                        if let EditorAction::Close = e.handle_key(k, theme) {
+                            self.close_editor();
+                        }
+                    } else if self.keys.editor.matches(&k) {
+                        if e.request_close() {
+                            self.close_editor();
+                        }
+                    } else if self.keys.editor_claude.matches(&k) {
+                        if e.focus == EditorFocus::Claude {
+                            e.focus = EditorFocus::File;
+                        } else {
+                            self.editor_focus_claude();
+                        }
+                    } else if self.keys.focus_list.matches(&k) {
+                        e.focus_left();
+                    } else if self.keys.focus_pane.matches(&k) {
+                        if e.focus == EditorFocus::File {
+                            self.editor_focus_claude();
+                        } else {
+                            e.focus_right();
+                        }
+                    } else if e.focus == EditorFocus::Claude {
+                        self.editor_claude_key(k);
+                    } else if let EditorAction::Close = e.handle_key(k, theme) {
+                        self.close_editor();
+                    }
+                }
                 Modal::Memory(_) => {
                     if self.keys.memory.matches(&k)
                         || matches!(k.code, KeyCode::Esc | KeyCode::Char('q'))
@@ -1887,6 +2104,9 @@ impl App {
         }
         if g.terminal.matches(&k) {
             return self.open_terminal();
+        }
+        if g.editor.matches(&k) {
+            return self.open_editor();
         }
         if g.memory.matches(&k) {
             return self.open_memory();
@@ -2022,8 +2242,6 @@ impl App {
             self.focus = Focus::List;
             return;
         };
-        let shift = k.modifiers.contains(KeyModifiers::SHIFT);
-        let rows = self.pane_inner.height.max(1) as usize;
         if self.sessions[i].pty.is_none() {
             match k.code {
                 KeyCode::Enter | KeyCode::Char('r') => {
@@ -2035,6 +2253,13 @@ impl App {
             }
             return;
         }
+        self.session_key(i, k);
+    }
+
+    /// Sends a key to session `i`'s claude; shift+PgUp/PgDn scroll it back instead.
+    fn session_key(&mut self, i: usize, k: KeyEvent) {
+        let shift = k.modifiers.contains(KeyModifiers::SHIFT);
+        let rows = self.pane_inner.height.max(1) as usize;
         match k.code {
             KeyCode::PageUp if shift => {
                 self.sessions[i].scroll += rows / 2;
@@ -2130,6 +2355,30 @@ impl App {
     fn handle_mouse(&mut self, m: MouseEvent) {
         if let Some(modal) = &mut self.modal {
             match modal {
+                Modal::Editor(e) => {
+                    // A selection or forwarded drag in the claude panel keeps going there.
+                    let target = if matches!(self.drag, Drag::Select | Drag::Forward) {
+                        MouseTarget::Claude
+                    } else {
+                        e.handle_mouse(m, self.theme)
+                    };
+                    if let MouseTarget::Close = target {
+                        return self.close_editor();
+                    }
+                    let claude = matches!(target, MouseTarget::Claude);
+                    if claude {
+                        // Clicking an empty panel starts claude, as ctrl+l does.
+                        if matches!(m.kind, MouseEventKind::Down(_))
+                            && self.pane_session().is_none()
+                        {
+                            self.editor_focus_claude();
+                        }
+                        self.pane_mouse(m);
+                    }
+                    if matches!(m.kind, MouseEventKind::Up(_)) {
+                        self.keep_editor_layout();
+                    }
+                }
                 Modal::Diff(d) => {
                     d.handle_mouse(m);
                     // Save once a separator drag ends, not on every step.
@@ -2179,19 +2428,7 @@ impl App {
         let (x, y) = (m.column, m.row);
         let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
         let sep = self.list_rect.x + self.list_rect.width;
-        let in_pane_inner = inside(self.pane_inner);
         let cur = self.current.clone().and_then(|c| self.session_idx(&c));
-        let mouse_mode = cur
-            .filter(|&i| self.sessions[i].pty.is_some())
-            .map(|i| {
-                self.sessions[i]
-                    .parser
-                    .lock()
-                    .unwrap()
-                    .screen()
-                    .mouse_protocol_mode()
-            })
-            .filter(|m| *m != vt100::MouseProtocolMode::None);
 
         match m.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -2242,18 +2479,9 @@ impl App {
                         }
                     }
                     self.last_click = Some((Instant::now(), x, y));
-                } else if in_pane_inner && cur.is_some() {
-                    self.focus = Focus::Pane;
-                    if mouse_mode.is_some() {
-                        self.forward_mouse(m);
-                        self.drag = Drag::Forward;
-                    } else {
-                        let p = (x - self.pane_inner.x, y - self.pane_inner.y);
-                        self.selection = Some((p, p));
-                        self.drag = Drag::Select;
-                    }
                 } else if inside(self.pane_rect) && cur.is_some() {
                     self.focus = Focus::Pane;
+                    self.pane_mouse(m);
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => match self.drag {
@@ -2267,34 +2495,17 @@ impl App {
                     self.state.graph_height =
                         ui::graph_height(bottom.saturating_sub(y), self.list_rect.height);
                 }
-                Drag::Select => {
-                    let px = x.clamp(
-                        self.pane_inner.x,
-                        self.pane_inner.x + self.pane_inner.width.saturating_sub(1),
-                    );
-                    let py = y.clamp(
-                        self.pane_inner.y,
-                        self.pane_inner.y + self.pane_inner.height.saturating_sub(1),
-                    );
-                    if let Some((a, _)) = self.selection {
-                        self.selection =
-                            Some((a, (px - self.pane_inner.x, py - self.pane_inner.y)));
-                    }
-                }
-                Drag::Forward => self.forward_mouse(m),
+                Drag::Select | Drag::Forward => self.pane_mouse(m),
                 Drag::None => {}
             },
-            MouseEventKind::Up(_) => {
-                match self.drag {
-                    Drag::Separator | Drag::GraphSeparator => {
-                        let _ = self.state.save();
-                    }
-                    Drag::Select => self.copy_selection(),
-                    Drag::Forward => self.forward_mouse(m),
-                    Drag::None => {}
+            MouseEventKind::Up(_) => match self.drag {
+                Drag::Separator | Drag::GraphSeparator => {
+                    let _ = self.state.save();
+                    self.drag = Drag::None;
                 }
-                self.drag = Drag::None;
-            }
+                Drag::Select | Drag::Forward => self.pane_mouse(m),
+                Drag::None => {}
+            },
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                 let up = m.kind == MouseEventKind::ScrollUp;
                 if inside(self.graph_rect) {
@@ -2311,24 +2522,89 @@ impl App {
                     p.scroll_by(if up { -3 } else { 3 });
                 } else if inside(self.list_rect) {
                     self.move_selection(if up { -1 } else { 1 });
-                } else if inside(self.pane_rect) {
-                    let Some(i) = cur else { return };
-                    if mouse_mode.is_some() && in_pane_inner {
-                        self.forward_mouse(m);
-                    } else if self.sessions[i]
-                        .parser
-                        .lock()
-                        .unwrap()
-                        .screen()
-                        .alternate_screen()
-                    {
-                        let seq: &[u8] = if up { b"\x1b[A" } else { b"\x1b[B" };
-                        self.sessions[i].write(&seq.repeat(3));
-                    } else if up {
-                        self.sessions[i].scroll += 3;
-                    } else {
-                        self.sessions[i].scroll = self.sessions[i].scroll.saturating_sub(3);
+                } else {
+                    self.pane_mouse(m);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Mouse events on the pane's session (the main pane, or the editor's claude panel):
+    /// forwarded when claude asks for the mouse, else drag-to-copy and scrollback.
+    fn pane_mouse(&mut self, m: MouseEvent) {
+        let (x, y) = (m.column, m.row);
+        let inside = |r: Rect| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+        let Some(i) = self.pane_session() else {
+            self.drag = Drag::None;
+            return;
+        };
+        let mouse_mode = Some(i)
+            .filter(|&i| self.sessions[i].pty.is_some())
+            .map(|i| {
+                self.sessions[i]
+                    .parser
+                    .lock()
+                    .unwrap()
+                    .screen()
+                    .mouse_protocol_mode()
+            })
+            .filter(|m| *m != vt100::MouseProtocolMode::None);
+        let in_inner = inside(self.pane_inner);
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) if in_inner => {
+                if mouse_mode.is_some() {
+                    self.forward_mouse(m);
+                    self.drag = Drag::Forward;
+                } else {
+                    let p = (x - self.pane_inner.x, y - self.pane_inner.y);
+                    self.selection = Some((p, p));
+                    self.drag = Drag::Select;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => match self.drag {
+                Drag::Select => {
+                    let px = x.clamp(
+                        self.pane_inner.x,
+                        self.pane_inner.x + self.pane_inner.width.saturating_sub(1),
+                    );
+                    let py = y.clamp(
+                        self.pane_inner.y,
+                        self.pane_inner.y + self.pane_inner.height.saturating_sub(1),
+                    );
+                    if let Some((a, _)) = self.selection {
+                        self.selection =
+                            Some((a, (px - self.pane_inner.x, py - self.pane_inner.y)));
                     }
+                }
+                Drag::Forward => self.forward_mouse(m),
+                _ => {}
+            },
+            MouseEventKind::Up(_) => {
+                match self.drag {
+                    Drag::Select => self.copy_selection(),
+                    Drag::Forward => self.forward_mouse(m),
+                    _ => {}
+                }
+                self.drag = Drag::None;
+            }
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp if inside(self.pane_rect) => {
+                let up = m.kind == MouseEventKind::ScrollUp;
+                if mouse_mode.is_some() && in_inner {
+                    self.forward_mouse(m);
+                } else if self.sessions[i]
+                    .parser
+                    .lock()
+                    .unwrap()
+                    .screen()
+                    .alternate_screen()
+                {
+                    let seq: &[u8] = if up { b"\x1b[A" } else { b"\x1b[B" };
+                    self.sessions[i].write(&seq.repeat(3));
+                } else if up {
+                    self.sessions[i].scroll += 3;
+                } else {
+                    self.sessions[i].scroll = self.sessions[i].scroll.saturating_sub(3);
                 }
             }
             _ => {}
@@ -2336,7 +2612,7 @@ impl App {
     }
 
     fn forward_mouse(&mut self, m: MouseEvent) {
-        let Some(i) = self.current.clone().and_then(|c| self.session_idx(&c)) else {
+        let Some(i) = self.pane_session() else {
             return;
         };
         let (x, y) = (
@@ -2381,7 +2657,7 @@ impl App {
         } else {
             (b, a)
         };
-        let Some(i) = self.current.clone().and_then(|c| self.session_idx(&c)) else {
+        let Some(i) = self.pane_session() else {
             return;
         };
         let text = {
