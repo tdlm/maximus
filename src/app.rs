@@ -73,6 +73,8 @@ pub enum ConfirmAction {
         wt: git::Worktree,
         merge: bool,
     },
+    /// Force-deletes these worktrees (each with its project) and their branches.
+    CleanWorktrees(Vec<(PathBuf, git::Worktree)>),
 }
 
 pub struct Confirm {
@@ -939,6 +941,19 @@ impl App {
         } else {
             None
         };
+        self.stop_worktree(wt);
+        match git::remove_worktree(project, wt, !merge) {
+            Err(e) => self.toast(format!("Removing the worktree failed: {e:#}")),
+            Ok(()) => match base {
+                Some(b) => self.toast(format!("Merged {} into {b}", wt.branch)),
+                None => self.toast(format!("Discarded {}", wt.branch)),
+            },
+        }
+        self.save();
+    }
+
+    /// Stops and archives the worktree's sessions and kills its shells.
+    fn stop_worktree(&mut self, wt: &git::Worktree) {
         for id in &self.worktree_sessions(wt) {
             self.close_session(id);
         }
@@ -949,12 +964,82 @@ impl App {
                 }
             }
         }
-        match git::remove_worktree(project, wt, !merge) {
-            Err(e) => self.toast(format!("Removing the worktree failed: {e:#}")),
-            Ok(()) => match base {
-                Some(b) => self.toast(format!("Merged {} into {b}", wt.branch)),
-                None => self.toast(format!("Discarded {}", wt.branch)),
-            },
+    }
+
+    /// Linked worktrees, across every project, with no running session or shell.
+    fn unused_worktrees(&self) -> Vec<(PathBuf, git::Worktree)> {
+        let busy: Vec<PathBuf> = self
+            .sessions
+            .iter()
+            .filter(|s| s.pty.is_some())
+            .map(|s| &s.cwd)
+            .chain(self.terminals.iter().map(|t| &t.cwd))
+            .filter_map(|p| p.canonicalize().ok())
+            .collect();
+        let mut res = Vec::new();
+        for p in &self.state.projects {
+            git::prune_worktrees(&p.path);
+            for wt in git::worktrees(&p.path) {
+                if !wt.main && !wt.path.canonicalize().is_ok_and(|d| busy.contains(&d)) {
+                    res.push((p.path.clone(), wt));
+                }
+            }
+        }
+        res
+    }
+
+    /// Asks before deleting every unused worktree.
+    fn request_clean_worktrees(&mut self) {
+        let wts = self.unused_worktrees();
+        if wts.is_empty() {
+            return self.toast("No unused worktrees");
+        }
+        let mut names: Vec<&str> = wts.iter().take(3).map(|(_, w)| w.branch.as_str()).collect();
+        let more = format!("+{} more", wts.len().saturating_sub(3));
+        if wts.len() > 3 {
+            names.push(&more);
+        }
+        let dirty = wts
+            .iter()
+            .filter(|(_, w)| git::changes(&w.path).is_ok_and(|c| !c.is_empty()))
+            .count();
+        let message = format!(
+            "Delete {} unused worktree{} and branch{} ({})?{}",
+            wts.len(),
+            if wts.len() == 1 { "" } else { "s" },
+            if wts.len() == 1 { "" } else { "es" },
+            names.join(", "),
+            match dirty {
+                0 => String::new(),
+                1 => " 1 has uncommitted changes.".into(),
+                n => format!(" {n} have uncommitted changes."),
+            }
+        );
+        self.modal = Some(Modal::Confirm(Confirm {
+            message,
+            action: ConfirmAction::CleanWorktrees(wts),
+        }));
+    }
+
+    /// Force-deletes the worktrees and their branches, archiving their stopped sessions.
+    fn clean_worktrees(&mut self, wts: &[(PathBuf, git::Worktree)]) {
+        let mut removed = 0;
+        let mut failed = vec![];
+        for (project, wt) in wts {
+            self.stop_worktree(wt);
+            match git::remove_worktree(project, wt, true) {
+                Ok(()) => removed += 1,
+                Err(e) => failed.push(format!("{}: {e:#}", wt.branch)),
+            }
+        }
+        let s = if removed == 1 { "" } else { "s" };
+        if failed.is_empty() {
+            self.toast(format!("Removed {removed} worktree{s}"));
+        } else {
+            self.toast(format!(
+                "Removed {removed} worktree{s}; failed {}",
+                failed.join("; ")
+            ));
         }
         self.save();
     }
@@ -1455,6 +1540,10 @@ impl App {
                 ));
             }
         }
+        items.push(Item {
+            detail: "W".into(),
+            ..cmd("Clean up unused worktrees".into(), Cmd::CleanWorktrees)
+        });
         for p in &self.state.projects {
             items.push(cmd(
                 format!("Remove project: {}", p.name),
@@ -1933,6 +2022,7 @@ impl App {
                 }
                 Cmd::MergeWorktree(id) => self.request_finish_worktree(&id, true),
                 Cmd::DiscardWorktree(id) => self.request_finish_worktree(&id, false),
+                Cmd::CleanWorktrees => self.request_clean_worktrees(),
                 Cmd::DefaultModel(m) => {
                     self.cfg.default_model = m.clone();
                     let _ = self.cfg.save();
@@ -2027,6 +2117,7 @@ impl App {
                             ConfirmAction::FinishWorktree { project, wt, merge } => {
                                 self.finish_worktree(&project, &wt, merge)
                             }
+                            ConfirmAction::CleanWorktrees(wts) => self.clean_worktrees(&wts),
                         }
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q') => {
@@ -2360,6 +2451,7 @@ impl App {
             },
             KeyCode::Char('n') => self.open_prompt(false),
             KeyCode::Char('w') => self.open_prompt(true),
+            KeyCode::Char('W') => self.request_clean_worktrees(),
             KeyCode::Char('N') => self.open_new_project(""),
             KeyCode::Char('o') => self.open_overview(),
             KeyCode::Char('?') => self.open_help(),
