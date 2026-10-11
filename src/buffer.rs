@@ -323,6 +323,11 @@ impl Buffer {
         self.version != self.saved
     }
 
+    /// Changes with every edit, undo and redo.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
     pub fn mark_saved(&mut self) {
         self.saved = self.version;
         self.last = None;

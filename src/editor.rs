@@ -14,6 +14,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Clear, Paragraph},
 };
+use similar::{Algorithm, DiffTag};
 use two_face::re_exports::syntect::{
     easy::HighlightLines,
     highlighting::{HighlightState, Theme as SynTheme},
@@ -230,6 +231,12 @@ struct OpenFile {
     /// Scroll to the cursor on the next draw.
     follow: bool,
     hl: Option<Highlighter>,
+    /// The file's lines at HEAD, which the gutter marks changes against; None outside a
+    /// repository, for files not committed yet, and for binary ones.
+    base: Option<Vec<String>>,
+    /// Each line's change mark, and the buffer version they were worked out for.
+    marks: Vec<Option<Mark>>,
+    marks_version: Option<u64>,
     /// Shown from the list with space: the next file shown that way takes its tab, unless it
     /// was edited or opened for real meanwhile.
     preview: bool,
@@ -260,6 +267,7 @@ fn load(root: &Path, path: &str, theme: &Theme) -> Result<OpenFile, String> {
     let hl = buf
         .as_ref()
         .map(|b| Highlighter::new(path, theme, b.lines.len()));
+    let base = buf.as_ref().and_then(|_| head_lines(root, path));
     Ok(OpenFile {
         path: path.to_string(),
         buf,
@@ -272,8 +280,64 @@ fn load(root: &Path, path: &str, theme: &Theme) -> Result<OpenFile, String> {
         wrap: wraps(path),
         follow: true,
         hl,
+        base,
+        marks: vec![],
+        marks_version: None,
         preview: false,
     })
+}
+
+/// How a line differs from HEAD, shown in the gutter as in VS Code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    Added,
+    Modified,
+    /// Lines were deleted just above this one, or just below it (at the end of the file).
+    DeletedAbove,
+    DeletedBelow,
+}
+
+/// `path`'s lines at HEAD, split as a buffer splits them.
+fn head_lines(root: &Path, path: &str) -> Option<Vec<String>> {
+    let text = String::from_utf8(git::head_contents(root, path)?).ok()?;
+    Some(
+        text.split('\n')
+            .map(|l| l.strip_suffix('\r').unwrap_or(l).to_string())
+            .collect(),
+    )
+}
+
+/// Each of `lines`' change mark against `base`.
+fn line_marks(base: &[String], lines: &[String]) -> Vec<Option<Mark>> {
+    let mut marks = vec![None; lines.len()];
+    let deadline = Instant::now() + Duration::from_millis(50);
+    for op in similar::capture_diff_slices_deadline(Algorithm::Myers, base, lines, Some(deadline)) {
+        let (tag, _, new) = op.as_tag_tuple();
+        match tag {
+            DiffTag::Equal => {}
+            DiffTag::Insert | DiffTag::Replace => {
+                let mark = if tag == DiffTag::Insert {
+                    Mark::Added
+                } else {
+                    Mark::Modified
+                };
+                for m in &mut marks[new] {
+                    *m = Some(mark);
+                }
+            }
+            DiffTag::Delete => {
+                let (i, mark) = if new.start < lines.len() {
+                    (new.start, Mark::DeletedAbove)
+                } else {
+                    (lines.len().saturating_sub(1), Mark::DeletedBelow)
+                };
+                if let Some(m @ None) = marks.get_mut(i) {
+                    *m = Some(mark);
+                }
+            }
+        }
+    }
+    marks
 }
 
 struct Find {
@@ -480,6 +544,15 @@ impl Editor {
         }
         self.tree = tree;
         self.files = files;
+        if changes != self.changes {
+            // A commit or checkout may have moved HEAD under the open files.
+            for of in &mut self.tabs {
+                if of.buf.is_some() {
+                    of.base = head_lines(&self.root, &of.path);
+                    of.marks_version = None;
+                }
+            }
+        }
         self.changes = changes;
         self.rebuild_rows();
     }
@@ -1546,6 +1619,13 @@ impl Editor {
             hl.invalidate(row);
         }
         hl.ensure(&buf.lines, of.top + h);
+        if of.marks_version != Some(buf.version()) {
+            of.marks = match &of.base {
+                Some(base) => line_marks(base, &buf.lines),
+                None => vec![],
+            };
+            of.marks_version = Some(buf.version());
+        }
         let sel = buf.selection();
         let mut lines = Vec::new();
         let (mut row, mut sub) = (of.top, of.top_sub);
@@ -1570,11 +1650,24 @@ impl Editor {
                 }
                 // The number on the line's first row only.
                 let num = if s == 0 {
-                    format!(" {:>n$} ", row + 1, n = gw - 2)
+                    format!(" {:>n$}", row + 1, n = gw - 2)
                 } else {
-                    " ".repeat(gw)
+                    " ".repeat(gw - 1)
                 };
-                let mut spans = vec![Span::styled(num, num_style)];
+                // A change bar beside every row of the line; a deletion mark on the edge
+                // it happened at.
+                let mark = match of.marks.get(row).copied().flatten() {
+                    Some(Mark::Added) => Span::styled("▎", Style::default().fg(t.green)),
+                    Some(Mark::Modified) => Span::styled("▎", Style::default().fg(t.blue)),
+                    Some(Mark::DeletedAbove) if s == 0 => {
+                        Span::styled("▔", Style::default().fg(t.red))
+                    }
+                    Some(Mark::DeletedBelow) if s + 1 == wr.rows() => {
+                        Span::styled("▁", Style::default().fg(t.red))
+                    }
+                    _ => Span::raw(" "),
+                };
+                let mut spans = vec![Span::styled(num, num_style), mark];
                 if ww == 0 {
                     spans.extend(render_line(&hl.lines[row], range, of.left, w, t.selection));
                 } else {
@@ -2083,8 +2176,30 @@ mod tests {
             wrap: true,
             follow: false,
             hl: None,
+            base: None,
+            marks: vec![],
+            marks_version: None,
             preview: false,
         }
+    }
+
+    #[test]
+    fn marks_lines_changed_since_head() {
+        let lines = |s: &str| s.split('\n').map(String::from).collect::<Vec<_>>();
+        let base = lines("a\nb\nc\nd");
+        assert_eq!(line_marks(&base, &base), vec![None; 4]);
+        assert_eq!(
+            line_marks(&base, &lines("a\nB\nc\nnew\nd")),
+            [None, Some(Mark::Modified), None, Some(Mark::Added), None]
+        );
+        assert_eq!(
+            line_marks(&base, &lines("a\nd")),
+            [None, Some(Mark::DeletedAbove)]
+        );
+        assert_eq!(
+            line_marks(&base, &lines("a\nb")),
+            [None, Some(Mark::DeletedBelow)]
+        );
     }
 
     #[test]
