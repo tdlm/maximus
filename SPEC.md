@@ -54,6 +54,7 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 | ctrl+g   | Diff viewer for focused session's tree    |
 | ctrl+k   | Commit the focused session's changes      |
 | ctrl+t   | Terminal in the focused session's tree    |
+| ctrl+e   | Editor for the focused session's tree     |
 | ctrl+y   | Memory usage                              |
 | ctrl+n   | Agent overview                            |
 | ctrl+s   | Settings                                  |
@@ -63,7 +64,7 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 
 All rebindable in settings. Note: these keys are then unavailable to claude itself
 (e.g. ctrl+p history-prev, ctrl+j newline, ctrl+k kill-line, ctrl+t task list, ctrl+y yank,
-ctrl+n history-next).
+ctrl+n history-next, ctrl+e end-of-line).
 
 ## Switcher (ctrl+p)
 
@@ -147,6 +148,53 @@ step through them, and alt+1–9 jumps to one. ctrl+t brings back the tab used l
 Quitting maximus counts running shells in its confirm; merging or discarding a worktree stops its
 shells.
 
+## Editor (ctrl+e)
+
+A full-screen view of the focused session's checkout (else the selected project's), Cursor-style:
+
+```
+╭ Files ───────╮╭ src/app.rs ● ───────────────╮╭ maximus · opus · main · working ─╮
+│ ▾ src      ● ││ app.rs ● ×  ui.rs ×         ││                                  │
+│   app.rs ● M ││  12 fn main() {             ││   (live claude PTY)              │
+│   ui.rs      ││  13     run();              ││                                  │
+│ Cargo.toml   ││  14 }                       ││                                  │
+╰──────────────╯╰─────────────────────────────╯╰──────────────────────────────────╯
+ ^s save  ^z ^y undo/redo  ^f find  ^c ^x ^v copy/cut/paste  ⌥←⌥→ panels  esc files  ^e close
+```
+
+- **Files**: the checkout's files as a collapsible tree — what git tracks or would track, so
+  ignored files stay out (a plain walk outside a repository). Changed files are coloured with
+  their status letter and folders holding changes get a dot. Files with unsaved edits, and the
+  folders holding them, get a `●`. Re-read every few seconds, so files claude creates appear.
+  `/` filters by fuzzy path match.
+- **Tabs**: each open file has a tab above the text, named by its file name (plus enough folders
+  to tell apart tabs with the same name), with `●` while it has unsaved edits and always a `×`
+  that closes it; a tab whose file changed on disk under unsaved edits is yellow. Enter or a
+  click in the list opens a file in a new tab beside the current one, or shows its tab if it's
+  open. Space opens a preview (italic) that the next preview replaces, until it's edited, saved
+  or opened for real. ctrl+PgUp/PgDn cycle tabs, alt+1–9 jump to one, ctrl+w or a middle click
+  closes one (asking to save, discard or cancel when it has unsaved edits). Showing a tab selects
+  its file in the list. Tabs scroll to keep the shown one in view.
+- **File**: the shown file, syntax highlighted (re-highlighted only from the edited line) and
+  editable — typing, auto-indent, tab/shift+tab indent, shift+arrow and mouse selection,
+  copy/cut/paste, undo/redo, find. ctrl+s saves, keeping the file's line endings. An open file
+  that changes on disk reloads in place when it has no unsaved edits, so claude's edits show live;
+  with unsaved edits the title says it changed on disk instead. Binary, huge and non-UTF-8 files
+  aren't opened for editing.
+- **Claude**: the session's live pane, resized to the panel and as wide as the file list unless
+  dragged; keys and the mouse behave as in the main pane, esc included. ctrl+l (rebindable) jumps
+  to it from the list or the file and back again. With no session in the checkout, focusing the
+  panel (ctrl+l, alt+→ or a click) starts claude there with no prompt, so there's always
+  somewhere to type; a stopped session resumes. Hidden when the screen is too narrow.
+
+The keys that focus the agent list and the pane (alt+←/→) move one panel left/right. ctrl+e
+closes from any panel, as does esc in the file list (esc in the file goes back to the list).
+Closing with unsaved changes in any tab asks to save them all, discard them all or keep editing.
+The save-changes question is a dialog over the file with clickable Save, Don't save and Cancel
+buttons (y, n, esc from the keyboard); it takes every key and click until answered.
+The editor remembers its tabs and folders for the next ctrl+e in the same checkout. Panel
+separators drag, and their widths persist.
+
 ## Memory (ctrl+y)
 
 A small centered modal listing resident memory (RSS from `ps`) for each live claude session and
@@ -165,7 +213,7 @@ the session (resuming a stopped one), esc closes. Rows scroll when there are mor
 ## Keyboard shortcuts (ctrl+/)
 
 A centered modal listing every shortcut, grouped by where it works: global, agent list, pane,
-commit graph, new prompt, diff viewer, commit, terminal and overview. Global keys show the user's
+commit graph, new prompt, diff viewer, commit, terminal, editor and overview. Global keys show the user's
 current bindings. Also `?` in the agent list and **Keyboard shortcuts** in the switcher. A filter
 line at the top narrows the list as you type: each word must appear in the row's key, description
 or group title (`ctrl`, `alt`, `shift` also match `^`, `⌥`, `⇧`), and empty groups drop out. The
