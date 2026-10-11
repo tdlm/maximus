@@ -158,7 +158,9 @@ or discard unsaved edits first — click a button or press `y`/`n`/`esc`), and c
 file is highlighted and
 editable: `ctrl+s` save, `ctrl+z`/`ctrl+y` undo/redo, `ctrl+f` find (`enter`/`↓` next,
 `shift+enter`/`↑` previous), `ctrl+c`/`ctrl+x`/`ctrl+v` copy/cut/paste (the whole line when
-nothing is selected), shift+arrows or the mouse to select, `tab`/`shift+tab` to indent. When
+nothing is selected), shift+arrows or the mouse to select, `tab`/`shift+tab` to indent. Long
+lines wrap at word boundaries as in VS Code; `alt+z` turns wrapping off or on for the file (minified
+files, source maps and CSV/TSV start unwrapped). When
 claude changes an open file it reloads in place, unless you have unsaved edits. `alt+←`/`alt+→`
 (your agent-list/pane keys) move between the panels, and `ctrl+l` jumps to the claude panel and
 back. If no claude is running in the checkout, going to the panel starts one, so you can just
