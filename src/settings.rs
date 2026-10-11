@@ -34,6 +34,7 @@ enum Field {
     DefaultModel,
     DefaultEffort,
     DefaultMode,
+    Chrome,
     Models,
     ProjectRoots,
     WorktreeDir,
@@ -96,6 +97,7 @@ fn fields(tab: usize) -> Vec<(Field, &'static str)> {
             (Field::DefaultModel, "Default model"),
             (Field::DefaultEffort, "Default effort"),
             (Field::DefaultMode, "Default permission mode"),
+            (Field::Chrome, "Chrome (claude --chrome)"),
             (Field::Models, "Model list"),
             (Field::ProjectRoots, "Folder search roots"),
             (Field::WorktreeDir, "Worktree directory"),
@@ -150,6 +152,7 @@ fn value(cfg: &Config, f: Field) -> String {
                 cfg.default_mode.clone()
             }
         }
+        Field::Chrome => on(cfg.chrome),
         Field::Models => cfg.models.join(", "),
         Field::ProjectRoots => cfg.project_roots.join(", "),
         Field::WorktreeDir => cfg.worktree_dir.clone(),
@@ -251,6 +254,7 @@ impl SettingsModal {
             Field::NotifMac => cfg.notifications.macos ^= true,
             Field::NotifBell => cfg.notifications.bell ^= true,
             Field::NotifBadge => cfg.notifications.badge ^= true,
+            Field::Chrome => cfg.chrome ^= true,
             Field::Intro => cfg.intro ^= true,
             Field::Theme => {
                 let i = THEMES.iter().position(|t| t.id == cfg.theme).unwrap_or(0) as i32;

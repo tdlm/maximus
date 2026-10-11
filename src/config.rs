@@ -54,6 +54,8 @@ pub struct Config {
     pub default_effort: String,
     /// Permission mode passed to claude --permission-mode; empty lets claude decide.
     pub default_mode: String,
+    /// Start claude with --chrome so it can drive the browser.
+    pub chrome: bool,
     pub models: Vec<String>,
     pub project_roots: Vec<String>,
     pub worktree_dir: String,
@@ -72,6 +74,7 @@ impl Default for Config {
             default_model: "opus".into(),
             default_effort: String::new(),
             default_mode: String::new(),
+            chrome: false,
             models: vec![
                 "fable".into(),
                 "opus".into(),

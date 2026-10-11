@@ -778,6 +778,7 @@ impl App {
         let launch = session::Launch {
             claude: &self.cfg.claude_command,
             mode: &self.cfg.default_mode,
+            chrome: self.cfg.chrome,
             settings: &self.hook_settings,
             sock: &self.sock,
             prompt,

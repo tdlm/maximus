@@ -63,6 +63,7 @@ pub struct Session {
 pub struct Launch<'a> {
     pub claude: &'a str,
     pub mode: &'a str,
+    pub chrome: bool,
     pub settings: &'a PathBuf,
     pub sock: &'a PathBuf,
     pub prompt: Option<&'a str>,
@@ -168,6 +169,9 @@ impl Session {
         }
         if !l.mode.is_empty() {
             cmd.args(["--permission-mode", l.mode]);
+        }
+        if l.chrome {
+            cmd.arg("--chrome");
         }
         cmd.arg("--settings");
         cmd.arg(l.settings);
