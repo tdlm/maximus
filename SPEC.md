@@ -149,6 +149,7 @@ have several shells, shown as tabs in the overlay's top border and named after w
 the foreground (`zsh`, `node`, ...): alt+t starts another, the prev/next-session keys (alt+↑/↓)
 step through them, and alt+1–9 jumps to one. ctrl+t brings back the tab used last. Exiting a shell
 (`exit`, ctrl+d) closes its tab and shows a neighbor, or closes the overlay with the last one.
+Dragging selects and copies, as in the pane; typing clears the selection.
 Quitting maximus counts running shells in its confirm; merging or discarding a worktree stops its
 shells.
 
