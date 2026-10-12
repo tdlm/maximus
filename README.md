@@ -145,7 +145,7 @@ leaves the shell running, so a dev server or watcher keeps going; `ctrl+t` bring
 shell. Need a second one beside the dev server? `alt+t` opens another shell in the same checkout as
 a tab, named after whatever it's running; `alt+↑/↓` switches between tabs and `alt+1`–`9` jumps
 straight to one. `exit` or `ctrl+d` ends a shell and closes its tab. `shift+PgUp/PgDn` or the mouse
-wheel scrolls back. Quitting asks first while any shell is running.
+wheel scrolls back; drag to select and copy. Quitting asks first while any shell is running.
 
 Editor (`ctrl+e`): a full-screen, Cursor-style view of the current session's checkout — the files
 on the left, open files in tabs in the middle and the session's claude on the right. The file
