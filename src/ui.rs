@@ -651,6 +651,21 @@ fn vt_color(c: vt100::Color, default: Color) -> Color {
 }
 
 /// Paints a terminal screen into `area`, highlighting the cells `selected` picks.
+/// Whether the cell at (row, column) is inside drag selection `sel`, which runs in reading
+/// order from one end to the other.
+fn in_selection(sel: Option<((u16, u16), (u16, u16))>) -> impl Fn(u16, u16) -> bool {
+    let sel = sel.map(|(a, b)| {
+        if (a.1, a.0) <= (b.1, b.0) {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    });
+    move |row, col| {
+        sel.is_some_and(|((sc, sr), (ec, er))| (row, col) >= (sr, sc) && (row, col) <= (er, ec))
+    }
+}
+
 fn draw_screen(
     f: &mut Frame,
     screen: &vt100::Screen,
@@ -768,17 +783,7 @@ fn draw_session(f: &mut Frame, app: &mut App, i: usize, inner: Rect, focused: bo
     parser.set_scrollback(s.scroll);
     s.scroll = parser.screen().scrollback();
     let screen = parser.screen();
-    let sel = app.selection.map(|(a, b)| {
-        if (a.1, a.0) <= (b.1, b.0) {
-            (a, b)
-        } else {
-            (b, a)
-        }
-    });
-    let in_sel = |row: u16, col: u16| {
-        sel.is_some_and(|((sc, sr), (ec, er))| (row, col) >= (sr, sc) && (row, col) <= (er, ec))
-    };
-    draw_screen(f, screen, inner, t, in_sel);
+    draw_screen(f, screen, inner, t, in_selection(app.selection));
     let scrolled = s.scroll;
     let live = s.pty.is_some();
     if focused && live && scrolled == 0 && !screen.hide_cursor() {
@@ -927,7 +932,7 @@ fn draw_terminal(f: &mut Frame, app: &mut App, area: Rect, id: u64) {
     parser.set_scrollback(term.scroll);
     term.scroll = parser.screen().scrollback();
     let screen = parser.screen();
-    draw_screen(f, screen, inner, t, |_, _| false);
+    draw_screen(f, screen, inner, t, in_selection(term.selection));
     if term.scroll == 0 && !screen.hide_cursor() {
         let (cr, cc) = screen.cursor_position();
         if cr < inner.height && cc < inner.width {
@@ -947,6 +952,8 @@ fn draw_terminal(f: &mut Frame, app: &mut App, area: Rect, id: u64) {
             },
         );
     }
+    // Mouse handling follows the overlay.
+    app.term_inner = inner;
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {

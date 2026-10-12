@@ -23,6 +23,8 @@ pub struct Terminal {
     pub pty: Pty,
     /// Lines scrolled back from the bottom (0 = live).
     pub scroll: usize,
+    /// The drag selection's anchor and end, as (column, row) in the overlay.
+    pub selection: Option<((u16, u16), (u16, u16))>,
     /// When the overlay last showed it, so ctrl+t brings back the last one used.
     pub shown: Instant,
 }
@@ -55,12 +57,14 @@ impl Terminal {
             parser,
             pty,
             scroll: 0,
+            selection: None,
             shown: Instant::now(),
         })
     }
 
     pub fn write(&mut self, bytes: &[u8]) {
         self.scroll = 0;
+        self.selection = None;
         self.pty.write(bytes);
     }
 

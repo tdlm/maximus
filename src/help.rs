@@ -135,6 +135,7 @@ fn sections(k: &GlobalKeys) -> Vec<Section> {
                 ("⌥1-9".into(), "Go to shell 1-9"),
                 ("^d".into(), "End the shell"),
                 ("⇧PgUp PgDn".into(), "Scroll back (or the mouse wheel)"),
+                ("drag".into(), "Select and copy"),
             ],
         ),
         (

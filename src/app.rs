@@ -322,6 +322,8 @@ pub struct App {
     pub graph_rect: Rect,
     pub pane_rect: Rect,
     pub pane_inner: Rect,
+    /// The terminal overlay's screen, as last drawn.
+    pub term_inner: Rect,
     pub list_rows: Vec<(u16, RowKey)>,
     pub list_offset: usize,
     pub selection: Option<((u16, u16), (u16, u16))>,
@@ -411,6 +413,7 @@ impl App {
             graph_rect: Rect::default(),
             pane_rect: Rect::default(),
             pane_inner: Rect::default(),
+            term_inner: Rect::default(),
             list_rows: vec![],
             list_offset: 0,
             selection: None,
@@ -2555,23 +2558,8 @@ impl App {
                     }
                 }
                 Modal::Terminal(id) => {
-                    let up = match m.kind {
-                        MouseEventKind::ScrollUp => true,
-                        MouseEventKind::ScrollDown => false,
-                        _ => return,
-                    };
-                    let Some(t) = self.terminals.iter_mut().find(|t| t.id == *id) else {
-                        return;
-                    };
-                    // Full-screen programs get arrow keys; a plain shell scrolls back.
-                    if t.parser.lock().unwrap().screen().alternate_screen() {
-                        let seq: &[u8] = if up { b"\x1b[A" } else { b"\x1b[B" };
-                        t.write(&seq.repeat(3));
-                    } else if up {
-                        t.scroll += 3;
-                    } else {
-                        t.scroll = t.scroll.saturating_sub(3);
-                    }
+                    let id = *id;
+                    self.terminal_mouse(id, m);
                 }
                 _ => {}
             }
@@ -2763,6 +2751,58 @@ impl App {
         }
     }
 
+    /// Mouse events on the terminal overlay: drag to copy, and the wheel scrolls back.
+    fn terminal_mouse(&mut self, id: u64, m: MouseEvent) {
+        let r = self.term_inner;
+        let Some(t) = self.terminals.iter_mut().find(|t| t.id == id) else {
+            return;
+        };
+        let (x, y) = (m.column, m.row);
+        // The cell under the mouse, held to the screen's edges.
+        let cell = (
+            x.clamp(r.x, r.x + r.width.saturating_sub(1)) - r.x,
+            y.clamp(r.y, r.y + r.height.saturating_sub(1)) - r.y,
+        );
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left)
+                if x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height =>
+            {
+                t.selection = Some((cell, cell));
+                self.drag = Drag::Select;
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.drag == Drag::Select => {
+                if let Some((a, _)) = t.selection {
+                    t.selection = Some((a, cell));
+                }
+            }
+            MouseEventKind::Up(_) if self.drag == Drag::Select => {
+                self.drag = Drag::None;
+                let Some(sel) = t.selection else { return };
+                if sel.0 == sel.1 {
+                    t.selection = None;
+                    return;
+                }
+                let text = selected_text(t.parser.lock().unwrap().screen(), sel);
+                if let Some(text) = text {
+                    self.copy(&text);
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let up = m.kind == MouseEventKind::ScrollUp;
+                // Full-screen programs get arrow keys; a plain shell scrolls back.
+                if t.parser.lock().unwrap().screen().alternate_screen() {
+                    let seq: &[u8] = if up { b"\x1b[A" } else { b"\x1b[B" };
+                    t.write(&seq.repeat(3));
+                } else if up {
+                    t.scroll += 3;
+                } else {
+                    t.scroll = t.scroll.saturating_sub(3);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn forward_mouse(&mut self, m: MouseEvent) {
         let Some(i) = self.pane_session() else {
             return;
@@ -2799,33 +2839,41 @@ impl App {
     }
 
     fn copy_selection(&mut self) {
-        let Some((a, b)) = self.selection else { return };
-        if a == b {
+        let Some(sel) = self.selection else { return };
+        if sel.0 == sel.1 {
             self.selection = None;
             return;
         }
-        let ((sc, sr), (ec, er)) = if (a.1, a.0) <= (b.1, b.0) {
-            (a, b)
-        } else {
-            (b, a)
-        };
         let Some(i) = self.pane_session() else {
             return;
         };
-        let text = {
-            let p = self.sessions[i].parser.lock().unwrap();
-            p.screen().contents_between(sr, sc, er, ec + 1)
-        };
-        let text: String = text
-            .lines()
-            .map(|l| l.trim_end())
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !text.trim().is_empty() {
-            notify::copy(&text);
-            self.toast(format!("Copied {} chars", text.chars().count()));
+        let text = selected_text(self.sessions[i].parser.lock().unwrap().screen(), sel);
+        if let Some(text) = text {
+            self.copy(&text);
         }
     }
+
+    fn copy(&mut self, text: &str) {
+        notify::copy(text);
+        self.toast(format!("Copied {} chars", text.chars().count()));
+    }
+}
+
+/// The text of `screen` inside drag selection `sel`, its lines' trailing blanks trimmed; none
+/// when it's all blank.
+fn selected_text(screen: &vt100::Screen, (a, b): ((u16, u16), (u16, u16))) -> Option<String> {
+    let ((sc, sr), (ec, er)) = if (a.1, a.0) <= (b.1, b.0) {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let text = screen
+        .contents_between(sr, sc, er, ec + 1)
+        .lines()
+        .map(|l| l.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.trim().is_empty()).then_some(text)
 }
 
 #[cfg(test)]
