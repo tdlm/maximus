@@ -1313,10 +1313,12 @@ impl App {
                 && idle > mins(t.idle_kill)
             {
                 s.kill();
+                s.expired = true;
                 changed = true;
             }
             if t.archive_finished > 0
                 && !s.archived
+                && !s.expired
                 && !is_current
                 && s.status == Status::Stopped
                 && idle > mins(t.archive_finished)

@@ -242,7 +242,8 @@ Modal with tabs: **General** (default model, effort, permission mode, Chrome via
 Stored at `~/.config/maximus/config.toml`; project list + layout in `~/.local/state/maximus/`.
 
 Timeouts (each can be off):
-- **Idle kill** — stop a claude process after N min idle (resumable).
+- **Idle kill** — stop a claude process after N min idle. The session stays in the list as
+  expired (never archived), and its pane says so: enter or `r` reopens it.
 - **Archive finished** — hide stopped sessions after N min (still in switcher); a session whose
   claude is still running stays in the list however long it's idle.
 - **Needs-input nag** — re-notify after N min waiting.

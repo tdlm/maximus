@@ -50,6 +50,8 @@ pub struct Session {
     pub status: Status,
     pub seen: bool,
     pub archived: bool,
+    /// Stopped by the idle timeout; kept out of the archive until reopened.
+    pub expired: bool,
     pub last_change: Instant,
     pub last_notified: Option<Instant>,
     pub parser: Arc<Mutex<vt100::Parser>>,
@@ -110,6 +112,7 @@ impl Session {
             status: Status::Stopped,
             seen: true,
             archived: false,
+            expired: false,
             last_change: Instant::now(),
             last_notified: None,
             parser: Arc::new(Mutex::new(vt100::Parser::new(24, 80, SCROLLBACK))),
@@ -155,6 +158,7 @@ impl Session {
     }
 
     pub fn spawn(&mut self, l: Launch, tx: Sender<AppEvent>) -> Result<()> {
+        self.expired = false;
         let mut cmd = CommandBuilder::new(l.claude);
         if l.resume {
             cmd.args(["--resume", &self.id]);

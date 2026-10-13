@@ -103,6 +103,7 @@ pub fn status_word(s: &Session) -> &'static str {
         Status::Done if !s.seen => "done · unseen",
         Status::Done => "done",
         Status::Idle => "idle",
+        Status::Stopped if s.expired => "expired",
         Status::Stopped => "stopped",
     }
 }
@@ -808,7 +809,11 @@ fn draw_session(f: &mut Frame, app: &mut App, i: usize, inner: Rect, focused: bo
         );
     }
     if !live {
-        let msg = " Session stopped · enter or r to resume ";
+        let msg = if s.expired {
+            " Session expired · enter or r to reopen "
+        } else {
+            " Session stopped · enter or r to resume "
+        };
         let w = (msg.chars().count() as u16).min(inner.width);
         let r = Rect {
             x: inner.x + (inner.width - w) / 2,

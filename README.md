@@ -176,7 +176,7 @@ servers, a dev server), so the total is what maximus is responsible for. It refr
 seconds while open; `esc` or `ctrl+y` closes it.
 
 Overview (`ctrl+n`, or `o` in the agent list): every agent in the Agents list as a tile — name,
-project and worktree branch, status (needs input, working, done, idle or stopped) and age — in
+project and worktree branch, status (needs input, working, done, idle, stopped or expired) and age — in
 attention order, so whatever needs you comes first; tiles needing input get a red border, unseen
 finished ones a blue one. A line at the top counts each status. Arrows or `hjkl` move, `enter` or a
 click opens the session (resuming it if stopped), `esc` or `ctrl+n` closes.
