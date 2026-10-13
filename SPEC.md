@@ -243,7 +243,8 @@ Stored at `~/.config/maximus/config.toml`; project list + layout in `~/.local/st
 
 Timeouts (each can be off):
 - **Idle kill** — stop a claude process after N min idle (resumable).
-- **Archive finished** — hide done sessions after N min (still in switcher).
+- **Archive finished** — hide stopped sessions after N min (still in switcher); a session whose
+  claude is still running stays in the list however long it's idle.
 - **Needs-input nag** — re-notify after N min waiting.
 
 ## Attention

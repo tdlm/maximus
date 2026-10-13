@@ -1318,7 +1318,7 @@ impl App {
             if t.archive_finished > 0
                 && !s.archived
                 && !is_current
-                && (matches!(s.status, Status::Stopped) || (s.status == Status::Done && s.seen))
+                && s.status == Status::Stopped
                 && idle > mins(t.archive_finished)
             {
                 s.archived = true;

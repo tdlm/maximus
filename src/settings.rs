@@ -105,7 +105,7 @@ fn fields(tab: usize) -> Vec<(Field, &'static str)> {
         ],
         1 => vec![
             (Field::IdleKill, "Stop idle sessions after"),
-            (Field::Archive, "Hide finished sessions after"),
+            (Field::Archive, "Hide stopped sessions after"),
             (Field::Nag, "Re-notify waiting sessions after"),
         ],
         2 => (0..KEY_NAMES.len())
