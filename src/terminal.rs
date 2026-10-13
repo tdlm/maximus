@@ -50,7 +50,9 @@ impl Terminal {
             size.1.max(20),
             SCROLLBACK,
         )));
-        let pty = Pty::spawn(cmd, size, &parser, colors, tx, AppEvent::ShellExited(id))?;
+        let pty = Pty::spawn(cmd, size, &parser, colors, tx, move |_| {
+            AppEvent::ShellExited(id)
+        })?;
         Ok(Self {
             id,
             cwd,

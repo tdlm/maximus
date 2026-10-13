@@ -11,7 +11,9 @@ work in any terminal at work (no ⌘ keys, no iTerm-only features required).
 - **Session**: a real `claude` CLI process running in a PTY, embedded in a pane (nebula-style).
   Full Claude Code feature parity; maximus does not re-render the conversation.
 - **Lifecycle**: sessions are owned by the TUI process (no daemon). Quitting asks to confirm if
-  anything is running. Every session is resumable later via `claude --resume <id>`.
+  anything is running. Every session is resumable later via `claude --resume <id>`. Quitting
+  claude itself (`/exit`, a clean exit) closes its session; a crash or a timeout kill leaves it
+  stopped in the list to reopen.
 - **Status** comes from Claude Code hooks (UserPromptSubmit / PreToolUse / Notification / Stop),
   injected per session via `--settings`, reporting over a unix socket to maximus. No screen-scraping.
 

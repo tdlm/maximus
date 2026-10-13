@@ -190,7 +190,8 @@ impl Session {
         cmd.env("MAXIMUS_SOCK", l.sock);
 
         self.generation += 1;
-        let exited = AppEvent::Exited(self.id.clone(), self.generation);
+        let (id, generation) = (self.id.clone(), self.generation);
+        let exited = move |clean| AppEvent::Exited(id, generation, clean);
         let colors = (l.term_bg, l.term_fg);
         self.pty = Some(Pty::spawn(cmd, l.size, &self.parser, colors, tx, exited)?);
         self.scroll = 0;
@@ -274,7 +275,7 @@ fn clean_env(cmd: &mut CommandBuilder) {
 
 impl Pty {
     /// Runs `cmd` in a new pty of `size` (rows, cols), feeding its output into a fresh
-    /// `parser` and sending `exited` once the process ends. `colors` (bg, fg) answer the
+    /// `parser` and sending `exited(clean)` once the process ends, `clean` when it exited 0. `colors` (bg, fg) answer the
     /// program's color queries.
     pub fn spawn(
         mut cmd: CommandBuilder,
@@ -282,7 +283,7 @@ impl Pty {
         parser: &Arc<Mutex<vt100::Parser>>,
         colors: ((u8, u8, u8), (u8, u8, u8)),
         tx: Sender<AppEvent>,
-        exited: AppEvent,
+        exited: impl FnOnce(bool) -> AppEvent + Send + 'static,
     ) -> Result<Self> {
         let (rows, cols) = (size.0.max(5), size.1.max(20));
         let pair = native_pty_system()
@@ -336,8 +337,8 @@ impl Pty {
             }
         });
         thread::spawn(move || {
-            let _ = child.wait();
-            let _ = tx.send(exited);
+            let clean = child.wait().is_ok_and(|s| s.success());
+            let _ = tx.send(exited(clean));
         });
 
         Ok(Self {

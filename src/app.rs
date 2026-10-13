@@ -35,7 +35,9 @@ use crate::{
 pub enum AppEvent {
     Input(Event),
     Output,
-    Exited(String, u64),
+    /// The claude of the session with this id and spawn generation exited, cleanly (status 0)
+    /// or not.
+    Exited(String, u64, bool),
     Hook(HookMsg),
     Folders(Vec<PathBuf>),
     Graph(PathBuf, Vec<GraphRow>),
@@ -1075,7 +1077,7 @@ impl App {
         match ev {
             AppEvent::Input(e) => self.handle_input(e),
             AppEvent::Output => {}
-            AppEvent::Exited(id, generation) => {
+            AppEvent::Exited(id, generation, clean) => {
                 if let Some(i) = self.session_idx(&id) {
                     let s = &mut self.sessions[i];
                     if s.generation == generation {
@@ -1085,6 +1087,11 @@ impl App {
                         s.set_status(Status::Stopped);
                         if quick {
                             self.toast("claude exited immediately — check the pane for errors");
+                        } else if clean {
+                            // A clean exit is the user quitting claude (/exit): close the session.
+                            // A kill or a crash leaves it in place to reopen.
+                            self.close_session(&id);
+                            self.save();
                         }
                     }
                 }
