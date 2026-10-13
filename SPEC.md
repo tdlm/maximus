@@ -252,6 +252,9 @@ Timeouts (each can be off):
 
 - Status dots + counts, needs-input sorted to top.
 - macOS notification when a session needs input / finishes while you're not looking at it.
+  iTerm2 (OSC 9), Ghostty and WezTerm (OSC 777) post it themselves, so clicking it brings the
+  terminal back; elsewhere (Terminal.app, inside tmux) it goes through osascript, which macOS
+  attributes to Script Editor.
 - Terminal bell + iTerm2 badge (`OSC 1337 SetBadgeFormat`, e.g. "2 waiting"); badge is a no-op elsewhere.
 
 ## Mouse
